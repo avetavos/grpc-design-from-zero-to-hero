@@ -1,0 +1,144 @@
+---
+title: 'gRPC-Gateway & Transcoding'
+description: 'เปิด REST/JSON facade จาก .proto เดียวกันด้วย google.api.http annotation และ reverse proxy ที่ generate มา — ภายในใช้ gRPC, ขอบนอกเป็น REST'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## สองกลุ่มผู้ใช้ contract เดียว
+
+ในโมดูล foundations เราพูดไว้ว่าระบบเดียวกันมักอยากได้ gRPC ภายในและ REST ที่ขอบนอก — call ที่เร็วและ typed ระหว่าง service ของตัวเอง แต่เป็น JSON ธรรมดาสำหรับ third party, browser และการเช็คด้วย `curl` เร็ว ๆ
+
+**Transcoding** ให้คุณ serve ทั้งสองจาก `.proto` *เดียวกัน* คุณ annotate แต่ละ method ด้วย REST route ที่มันควรตอบด้วย แล้ว **reverse proxy** ที่ generate มาจะแปล request แบบ JSON/HTTP ที่เข้ามาให้เป็น gRPC call และแปลง protobuf response กลับเป็น JSON
+
+## Annotate ที่ method
+
+คุณอธิบาย REST mapping ไว้ใน service definition เลย โดยใช้ `google.api.http` annotation:
+
+```proto
+import "google/api/annotations.proto";
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User) {
+    option (google.api.http) = {
+      get: "/v1/users/{id}"
+    };
+  }
+
+  rpc CreateUser(CreateUserRequest) returns (User) {
+    option (google.api.http) = {
+      post: "/v1/users"
+      body: "*"
+    };
+  }
+}
+```
+
+ตอนนี้ `GetUser` ตอบ `GET /v1/users/42` ได้ด้วย — path segment `{id}` map เข้ากับ field `id` ของ request ส่วน `CreateUser` ตอบ `POST /v1/users` โดย JSON body map เข้ากับ request message ตัว gRPC method ไม่เปลี่ยน annotation แค่เพิ่มประตู REST เข้าไป
+
+## `.proto` เดียว สองประตูหน้าบ้าน
+
+<Mermaid title="service เดียวกัน เข้าถึงเป็น gRPC หรือ REST/JSON ก็ได้" code={gwDiagram} />
+
+export const gwDiagram = `flowchart TB
+  proto[".proto\n+ google.api.http\nannotations"] --> svc["UserService\n(gRPC impl)"]
+  internal["internal services\n(native gRPC)"] --> svc
+  ext["external client\nGET /v1/users/42"] --> gw["grpc-gateway\nreverse proxy"]
+  gw -->|translates JSON↔protobuf| svc`;
+
+gateway เป็น code ที่ generate มา (grpc-gateway ใน ecosystem ของ Go; Envoy ก็ทำ transcoding ผ่าน filter ได้) มัน parse URL กับ JSON, สร้าง protobuf request, เรียก gRPC method จริง แล้ว marshal reply กลับเป็น JSON — ทั้งหมดขับเคลื่อนด้วย annotation
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // Run the gateway alongside the gRPC server
+    mux := runtime.NewServeMux()
+    err := userv1.RegisterUserServiceHandlerFromEndpoint(
+        ctx, mux, "localhost:50051",
+        []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+    )
+    if err != nil { log.Fatal(err) }
+    http.ListenAndServe(":8080", mux) // REST/JSON on :8080, gRPC on :50051
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Python typically uses Envoy's grpc_json_transcoder filter,
+    # pointed at the same descriptor set the .proto compiles to:
+    #   - name: envoy.filters.http.grpc_json_transcoder
+    #     typed_config:
+    #       proto_descriptor: "user_descriptor.pb"
+    #       services: ["user.v1.UserService"]
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // Node commonly fronts gRPC with Envoy transcoding as well,
+    // or uses Connect, which can serve JSON directly from the same service.
+    // Either way the mapping lives in the .proto annotations, not hand-written routes.
+    ```
+  </TabItem>
+</Tabs>
+
+## เมื่อไรควรหยิบมาใช้
+
+- **มี consumer ภายนอกหรือ browser** ที่คาดหวัง REST/JSON แต่คุณไม่อยาก maintain API ตัวที่สองด้วยมือ transcoding ทำให้เหลือ contract เดียว
+- **อยากได้ความ `curl`-ได้ และ OpenAPI doc** annotation ชุดเดียวกัน generate OpenAPI spec ได้
+- **ข้ามไปถ้าทุกอย่างอยู่ภายใน** ถ้ามีแต่ service ของตัวเองที่เรียก API การเพิ่ม proxy hop และการแปลง JSON เป็น overhead ล้วน ๆ — อยู่กับ native gRPC ต่อไป
+
+<Callout title="สรุปหนึ่งบรรทัด">
+Transcoding serve ทั้ง REST/JSON และ gRPC จาก `.proto` เดียว: `google.api.http` annotation ประกาศ REST route ให้แต่ละ method และ reverse proxy ที่ generate มา (grpc-gateway หรือ Envoy) แปล JSON↔protobuf ใช้เมื่อต้องหันหน้าออกโลกภายนอกโดยไม่ต้อง maintain API ตัวที่สอง — และข้ามไปเมื่อทุก caller เป็น internal gRPC อยู่แล้ว
+</Callout>
+
+export const quizGw = [
+  {
+    q: 'transcoding ให้คุณทำอะไรได้?',
+    options: [
+      'แปลง protobuf เป็น XML ตอน runtime',
+      'serve ทั้ง REST/JSON และ gRPC จาก `.proto` contract เดียวกัน',
+      'แทน HTTP/2 ด้วย HTTP/1.1 กับ traffic ทั้งหมด',
+      'encrypt gRPC โดยไม่ต้องมี TLS',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'REST route ของ method ประกาศไว้ที่ไหน?',
+    options: [
+      'ในไฟล์ router ที่เขียนมือแยกต่างหาก',
+      'ด้วย google.api.http annotation บน rpc ใน `.proto`',
+      'ด้วยการตั้งชื่อ method ว่า GET_ หรือ POST_',
+      'ใน database schema',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'gateway ที่ generate มาทำอะไรจริง ๆ ตอน runtime?',
+    options: [
+      'cache response ทั้งหมดไว้ใน memory',
+      'แปล JSON/HTTP ที่เข้ามาให้เป็น gRPC call แล้วแปลง protobuf reply กลับเป็น JSON',
+      'compile `.proto` ทุก request',
+      'load balance ระหว่าง database',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เมื่อไรที่ transcoding ไม่คุ้ม?',
+    options: [
+      'เมื่อ client ภายนอกต้องการ JSON',
+      'เมื่ออยากได้ OpenAPI document',
+      'เมื่อทุก caller เป็น internal gRPC service อยู่แล้ว — proxy hop เป็น overhead ล้วน ๆ',
+      'เมื่อมี method มากกว่าหนึ่งตัว',
+    ],
+    answer: 2,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/grpc-gateway-transcoding" questions={quizGw} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/grpc-gateway-transcoding" />

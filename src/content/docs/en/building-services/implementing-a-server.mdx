@@ -1,0 +1,161 @@
+---
+title: 'Implementing a Server'
+description: 'Fill in the generated handler, register your service on a gRPC server, and start listening — a complete unary server in three languages.'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Three steps, always the same
+
+Codegen gave you a **server interface** with one method per `rpc`. Implementing a server is always the same three steps:
+
+1. **Implement the handler** — write the body of `GetUser`: take the request, return the response (or an error).
+2. **Register** your implementation on a gRPC server object.
+3. **Serve** — bind to a port and start accepting HTTP/2 connections.
+
+<Mermaid title="How a request reaches your handler" code={serverDiagram} />
+
+export const serverDiagram = `flowchart LR
+  client["client stub"] -->|GetUserRequest| server["gRPC server\n(listening on :50051)"]
+  server -->|dispatch by method| handler["your GetUser handler"]
+  handler -->|User| server
+  server -->|response| client`;
+
+The gRPC server handles all the HTTP/2, protobuf decoding, and method dispatch. Your handler only ever sees a typed request and returns a typed response.
+
+## A complete unary server
+
+Here is the whole thing — handler, registration, and serving — for `UserService.GetUser`:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    type server struct {
+        userv1.UnimplementedUserServiceServer // forward-compat embedding
+    }
+
+    // GetUser is the handler: request in, response out.
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        // (normally you'd look this up in a database)
+        return &userv1.User{
+            Id:    req.Id,
+            Name:  "Ada Lovelace",
+            Email: "ada@example.com",
+        }, nil
+    }
+
+    func main() {
+        lis, _ := net.Listen("tcp", ":50051")
+        s := grpc.NewServer()
+        userv1.RegisterUserServiceServer(s, &server{}) // register
+        log.Println("listening on :50051")
+        s.Serve(lis) // serve
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    class UserService(user_pb2_grpc.UserServiceServicer):
+        # GetUser is the handler: request in, response out.
+        def GetUser(self, request, context):
+            return user_pb2.User(
+                id=request.id,
+                name="Ada Lovelace",
+                email="ada@example.com",
+            )
+
+    def serve():
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        user_pb2_grpc.add_UserServiceServicer_to_server(UserService(), server)  # register
+        server.add_insecure_port("[::]:50051")
+        server.start()  # serve
+        print("listening on :50051")
+        server.wait_for_termination()
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // GetUser is the handler: request in, callback out.
+    const userService = {
+      getUser(call, callback) {
+        callback(null, {
+          id: call.request.id,
+          name: 'Ada Lovelace',
+          email: 'ada@example.com',
+        });
+      },
+    };
+
+    const server = new Server();
+    server.addService(UserServiceService, userService); // register
+    server.bindAsync('0.0.0.0:50051', ServerCredentials.createInsecure(), () => {
+      console.log('listening on :50051'); // serve
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## Returning errors, not exceptions
+
+When something goes wrong, you do not throw a random exception — you return a gRPC **status**. A missing user is `NOT_FOUND`, bad input is `INVALID_ARGUMENT`. The error model has its own lesson in the Service Definition module; the key habit to start now is: **map failures to status codes deliberately**, because that status is what the client's `err` will carry.
+
+## One handler, many concurrent calls
+
+Because the server rides on HTTP/2 multiplexing, many calls hit your handler concurrently over the same connections. In Go each call runs in its own goroutine; in Python a thread pool serves them; in Node the event loop interleaves them. That means **your handler must be safe to run concurrently** — no unsynchronized shared mutable state.
+
+<Callout title="The one-line takeaway">
+A gRPC server is: implement the generated handler (typed request in, typed response or status error out), register it on a server object, and serve on a port. The framework does HTTP/2, decoding, and dispatch — you just write the method body, and you write it to be concurrency-safe.
+</Callout>
+
+export const quizServer = [
+  {
+    q: 'What are the three steps to implement a gRPC server?',
+    options: [
+      'Parse, compile, link',
+      'Implement the handler, register the service, serve on a port',
+      'Connect, authenticate, disconnect',
+      'Marshal, send, unmarshal',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does your handler receive and return?',
+    options: [
+      'Raw HTTP/2 frames',
+      'A typed request; it returns a typed response or a status error',
+      'A JSON string',
+      'A file path',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How should a handler signal that a user was not found?',
+    options: [
+      'Throw a random exception',
+      'Return a NOT_FOUND status',
+      'Return null and hope',
+      'Close the connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why must a gRPC handler be concurrency-safe?',
+    options: [
+      'Because protobuf is single-threaded',
+      'Because HTTP/2 multiplexing means many calls run through it concurrently',
+      'Because the client retries automatically',
+      'It does not — handlers always run one at a time',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/implementing-a-server" questions={quizServer} />
+
+<ProgressTracker client:visible id="building-services/implementing-a-server" />

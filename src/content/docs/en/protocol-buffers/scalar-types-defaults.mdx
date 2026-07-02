@@ -1,0 +1,120 @@
+---
+title: 'Scalar Types & Defaults'
+description: 'The built-in scalar types and how to pick them, proto3 default values, and the "can''t tell unset from zero" trap that the optional keyword solves.'
+sidebar:
+  order: 3
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The scalar types
+
+Protobuf ships a small set of scalar types. The interesting choices are among the integers, where the encoding — not just the range — should drive your pick.
+
+| proto type | Use it for | Notes |
+|------------|-----------|-------|
+| `int32` / `int64` | General integers | Variable-length; **inefficient for negatives** |
+| `uint32` / `uint64` | Values that are never negative | Variable-length |
+| `sint32` / `sint64` | Integers that are **often negative** | ZigZag encoding — far smaller for negatives |
+| `fixed32` / `fixed64` | Large values that are usually big | Always 4/8 bytes; beats varint past ~2^28 |
+| `float` / `double` | Fractional numbers | 4 / 8 bytes |
+| `bool` | True / false | 1 byte |
+| `string` | UTF-8 text | Must be valid UTF-8 |
+| `bytes` | Arbitrary binary | Any byte sequence |
+
+The subtlety: `int32`/`int64` use **varint** encoding, which is compact for small positive numbers but wastes bytes on negatives. If a field is regularly negative, use `sint32`/`sint64`. If it's a random large number (like a hash), `fixed64` avoids varint's overhead.
+
+## proto3 default values
+
+In proto3, every field has a **default**, and a field that was never set is indistinguishable from a field explicitly set to that default:
+
+| Type | Default |
+|------|---------|
+| numbers | `0` |
+| `bool` | `false` |
+| `string` | `""` (empty) |
+| `bytes` | empty |
+| `enum` | the first value (must be `0`) |
+| message | not set (`null`-like) |
+
+And here is the trap that surprises everyone.
+
+## The "unset vs zero" problem
+
+A plain proto3 scalar cannot tell you *"was this field sent?"* — it only tells you the value, and an absent field reads as the default.
+
+<Mermaid title="Without presence, absent and zero look identical" code={presenceDiagram} />
+
+export const presenceDiagram = `flowchart TB
+  a["client omits 'age'"] --> z["server reads age = 0"]
+  b["client sends age = 0"] --> z
+  z --> q["server cannot tell\nwhich one happened"]`;
+
+Imagine an `UpdateUser` request with `int32 age = 5`. If the client wants to *clear* the age it sends `0` — but a client that simply didn't touch age *also* sends `0`. The server can't distinguish "set to zero" from "not provided." For partial updates, that ambiguity is a real bug.
+
+## `optional` brings back presence
+
+proto3 later reintroduced **field presence** via the `optional` keyword. An `optional` scalar tracks whether it was explicitly set, giving generated code a `has_age()` / `hasAge` check:
+
+```proto
+message UpdateUserRequest {
+  int64           id  = 1;
+  optional int32  age = 5;   // now distinguishable: set vs unset
+}
+```
+
+Reach for `optional` whenever "not provided" must be different from "the zero value" — classic cases are **partial updates (PATCH-style)** and settings where `0`/`false`/`""` are legitimate values a user might choose.
+
+<Callout title="The one-line takeaway">
+Pick integer types by *encoding*, not just range — `sint` for often-negative, `fixed` for large. And remember proto3's defining quirk: a plain scalar can't tell **unset** from **zero**. When that difference matters (partial updates especially), mark the field `optional` to get real presence.
+</Callout>
+
+export const quizScalar = [
+  {
+    q: 'Which type is best for an integer field that is frequently negative?',
+    options: [
+      'int32 (varint)',
+      'sint32 (ZigZag)',
+      'uint32',
+      'bool',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'In proto3, what is the default value of an unset string field?',
+    options: [
+      'null',
+      'The empty string ""',
+      'The word "default"',
+      'It throws an error',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the "unset vs zero" problem?',
+    options: [
+      'Zero is not a valid protobuf value',
+      'A plain scalar cannot distinguish "not provided" from "explicitly set to the default"',
+      'Optional fields are always slower',
+      'Enums cannot start at zero',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When should you mark a scalar field `optional`?',
+    options: [
+      'Always, on every field',
+      'When "not provided" must be distinguishable from the zero value — e.g. partial updates',
+      'Only for strings',
+      'Never — optional is removed in proto3',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/scalar-types-defaults" questions={quizScalar} />
+
+<ProgressTracker client:visible id="protocol-buffers/scalar-types-defaults" />

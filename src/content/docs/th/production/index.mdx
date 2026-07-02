@@ -1,0 +1,80 @@
+---
+title: 'Production Concerns'
+description: 'กลไก cross-cutting ที่เปลี่ยน gRPC service ที่แค่ "ทำงานได้" ให้พร้อมขึ้น production — interceptor, security, metadata, load balancing และ health checking'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## จาก "มันทำงานได้" ไปสู่ "มันขึ้น production ได้"
+
+คุณนิยาม service, generate stub, implement handler แล้วเรียกใช้ได้ — บนเครื่องคุณมันทำงานได้ แต่ production ถามคำถามที่ยากกว่านั้น: จะ log และ authenticate *ทุก* call โดยไม่ต้องแก้ทุก handler ยังไง? จะเข้ารหัส traffic และพิสูจน์ว่าใครเป็นคนเรียกยังไง? จะกระจาย load ไปยัง backend หลายตัวยังไง ในเมื่อ gRPC ตั้งใจถือ connection เดียวที่อยู่ยาว? โมดูลนี้ตอบคำถามพวกนี้
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียน |
+|--------|-------------------|
+| Interceptors | middleware model — ห่อทุก call เพื่อทำ logging, auth, metrics, retry |
+| Security & Auth | TLS และ mTLS สำหรับ channel, token auth ต่อ call และทำไมมันแยกกัน |
+| Metadata | header และ trailer แบบ key/value — auth token, trace id, request id |
+| Load balancing & health | ทำไม L4 balancer ทำ gRPC พัง, client-side LB และ health checking |
+
+## ธีมของโมดูล: cross-cutting concern
+
+ทุกอย่างในนี้คือ **cross-cutting concern** — สิ่งที่ทุก RPC ต้องการ แต่ไม่ควรเป็นของ handler ตัวใดตัวหนึ่ง
+
+<Mermaid title="cross-cutting concern ห่อ business logic ไว้ ไม่ได้อยู่ข้างใน" code={crossCutDiagram} />
+
+export const crossCutDiagram = `flowchart LR
+  call["incoming call"] --> tls["TLS / auth"]
+  tls --> intc["interceptors\n(log, metrics)"]
+  intc --> md["metadata\n(trace id, token)"]
+  md --> handler["handler ของคุณ\n(business logic)"]
+  handler --> lb["load balancing\nกระจาย call ไปหลาย backend"]`;
+
+gRPC มี hook ระดับ first-class ให้แต่ละอย่าง เพื่อให้ handler ของคุณโฟกัสแค่ business logic เรียนรู้พวกนี้แล้ว service ของคุณจะ observable, secure และ scale ได้ โดยไม่ต้องเขียน code ที่ทำงานจริงใหม่
+
+<Callout title="ทำไมโมดูลนี้ถึงสำคัญ">
+ความต่างระหว่าง demo กับ service จริงเกือบทั้งหมดคือ cross-cutting: **security, observability และ scale** gRPC ฝัง hook ของทั้งสามอย่างไว้ใน framework — interceptor, credentials, metadata และ load-balancing policy — เพื่อให้คุณตั้งค่าครั้งเดียว แทนที่จะกระจายมันไปทั่วทุก method
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'ทุกหัวข้อในโมดูลนี้มีอะไรเหมือนกัน?',
+    options: [
+      'มันเปลี่ยน .proto schema',
+      'มันเป็น cross-cutting concern — ทุก call ต้องการ แต่ไม่มี handler ตัวไหนเป็นเจ้าของ',
+      'มันใช้ได้เฉพาะกับ streaming RPC',
+      'มันเป็น feature ของ database',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม logging และ auth ควรอยู่ใน interceptor แทนที่จะอยู่ในแต่ละ handler?',
+    options: [
+      'handler เข้าถึง metadata ไม่ได้',
+      'เพื่อให้ handler โฟกัสแค่ business logic และ concern ถูก apply ครั้งเดียว',
+      'เพราะ gRPC ห้าม log ใน handler',
+      'เพื่อทำให้ .proto เล็กลง',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'อะไรทำให้ load balancing ใน gRPC ยากเป็นพิเศษ?',
+    options: [
+      'gRPC ไม่มี client',
+      'gRPC ตั้งใจถือ connection เดียวที่อยู่ยาวแบบ multiplex ซึ่ง L4 balancer แบบไร้เดียงสาจะ pin ไว้ที่ backend เดียว',
+      'gRPC ใช้ TLS ไม่ได้',
+      'gRPC รันได้บนเครื่องเดียวเท่านั้น',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="production/index" />

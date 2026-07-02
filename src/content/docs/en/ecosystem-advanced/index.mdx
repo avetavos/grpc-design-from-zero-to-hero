@@ -1,0 +1,82 @@
+---
+title: 'Ecosystem & Advanced'
+description: 'Where gRPC meets the rest of the world — browsers, REST clients, multiple API versions, and the tooling that keeps a fleet of services observable and tested.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Beyond the happy path
+
+By now you can design a schema, define a service, implement it, stream, and secure it. This final module is about everything **around** that core — the reality that your gRPC service rarely lives alone.
+
+Browsers can't speak native gRPC. Some clients still want REST and JSON. Your API will outlive its first version. And a fleet of services needs to be observable and testable. Each of those is a solved problem with a well-worn tool, and this module walks through them.
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| gRPC-Web | Why browsers need a proxy, the gRPC-Web protocol, and Connect |
+| gRPC-Gateway & transcoding | Exposing a REST/JSON facade from the same `.proto` |
+| Versioning & evolution | Versioned packages, additive vs breaking changes, `buf breaking` |
+| Observability & testing | Reflection, tracing/metrics, and in-process testing |
+
+## The shape of a real deployment
+
+A production gRPC system usually looks less like "clients call one server" and more like a small ecosystem of translators and observers:
+
+<Mermaid title="One gRPC core, many ways in and out" code={ecoDiagram} />
+
+export const ecoDiagram = `flowchart TB
+  browser["browser\n(gRPC-Web)"] --> proxy["proxy /\ntranscoder"]
+  rest["REST client\n(JSON)"] --> proxy
+  proxy --> core["gRPC services\n(v1, v2)"]
+  svc["other gRPC\nservices"] --> core
+  core --> obs["interceptors →\nmetrics · traces · logs"]`;
+
+The `.proto` you wrote is still the single source of truth. Everything here — the web client, the REST gateway, the next API version, the tracing — hangs off that same contract.
+
+<Callout title="The one-line takeaway">
+gRPC rarely lives alone. Browsers reach it through gRPC-Web, REST clients through transcoding, and both new and old callers through versioned packages — while interceptors make the whole fleet observable. The `.proto` remains the anchor that all of it is generated from.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'Why does a production gRPC system usually need extra components around the core?',
+    options: [
+      'Because gRPC servers cannot handle more than one client',
+      'Because browsers, REST clients, versioning, and observability each need translation or tooling',
+      'Because protobuf must be converted to XML',
+      'Because HTTP/2 is not allowed in production',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What stays the single source of truth across web clients, REST gateways, and versions?',
+    options: [
+      'The load balancer',
+      'The .proto contract',
+      'The database schema',
+      'The API gateway config file',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How do gRPC services typically become observable?',
+    options: [
+      'By writing logs to a file manually in every handler',
+      'Through interceptors that add metrics, traces, and logs',
+      'They cannot be observed',
+      'By switching to REST',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/index" />

@@ -1,0 +1,111 @@
+---
+title: 'gRPC vs REST'
+description: 'แต่ละแบบเหมาะกับอะไร, trade-off เรื่อง performance และ tooling ที่แท้จริง และคำแนะนำตรง ๆ ว่าเมื่อไรไม่ควรหยิบ gRPC มาใช้'
+sidebar:
+  order: 3
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## สอง mental model ที่ต่างกัน
+
+REST และ gRPC แก้ปัญหากว้าง ๆ เดียวกัน — โปรแกรมหนึ่งคุยกับอีกโปรแกรมหนึ่ง — แต่มองมันคนละมุม
+
+- **REST** คิดในแง่ **resource** คุณมีคำนาม (`/users/42`) และกระทำกับมันด้วย verb ชุดเล็ก ๆ ที่ตายตัว (`GET`, `POST`, `PUT`, `DELETE`) ข้อมูลมักเป็น JSON และ contract มักเป็นเอกสาร (OpenAPI) หรือแค่ convention
+- **gRPC** คิดในแง่ **procedure** คุณมี method (`GetUser`, `CreateOrder`, `StreamPrices`) แต่ละตัวมี request และ response ที่มี type นิยามไว้ใน `.proto` ข้อมูลเป็น binary protobuf และ contract ก็คือ schema เอง
+
+ไม่มีโมเดลไหน "ถูก" — แต่ละตัว optimize เพื่อคนละเรื่อง
+
+## เทียบกันแบบตรงไปตรงมา
+
+| | REST + JSON | gRPC + Protobuf |
+|--|-------------|-----------------|
+| **payload** | text (JSON) — คนอ่านได้ แต่ใหญ่กว่า | binary — กระชับ parse เร็ว |
+| **contract** | มีก็ได้ (OpenAPI / convention) | บังคับ (`.proto`) และ enforce ด้วย codegen |
+| **การรองรับ browser** | native ใช้ได้ทุกที่ | ต้องมี gRPC-Web + proxy |
+| **streaming** | ทำได้แต่ขลุกขลัก (SSE, long-poll) | first-class, สองทิศทาง |
+| **การ debug ด้วยตาคน** | `curl` แล้วอ่านได้เลย | ต้องมี tooling (`grpcurl`, reflection) |
+| **codegen / type safety** | เป็น add-on ขึ้นกับเครื่องมือ | มีในตัว ครอบคลุม 11+ ภาษา |
+| **เหมาะกับ** | public API, browser, CRUD ง่าย ๆ | เรียกกันภายในระหว่าง service, latency ต่ำ, streaming |
+
+## ทำไม gRPC ถึงเร็วกว่า (และเมื่อไรที่มันสำคัญ)
+
+มี 2 อย่างที่ทำให้ gRPC มีประสิทธิภาพบน wire:
+
+<Mermaid title="จุดที่ gRPC ประหยัดเวลาเทียบกับ REST/JSON" code={perfDiagram} />
+
+export const perfDiagram = `flowchart TB
+  subgraph rest["REST + JSON"]
+    r1["parse text JSON\n(reflective, ใหญ่กว่า)"] --> r2["connection ใหม่\nหรือ HTTP/1.1 head-of-line"]
+  end
+  subgraph grpc["gRPC + Protobuf"]
+    g1["decode binary protobuf\n(schema-driven, กระชับ)"] --> g2["HTTP/2 multiplexing\nหลาย call, หนึ่ง connection"]
+  end`;
+
+1. **protobuf เล็กกว่าและ decode ถูกกว่า JSON** field ถูกระบุด้วยหมายเลข ไม่ใช่ชื่อ และค่าถูกแพ็คเป็น binary ไม่มีการ match key แบบ reflective และไม่มีการ parse text
+2. **HTTP/2 multiplexing** ทำให้หลาย call ที่กำลังทำงานอยู่ใช้ connection เดียวร่วมกันได้โดยไม่บล็อกกัน (บทถัดไปจะเจาะลึกเรื่องนี้)
+
+แต่ต้องพูดกันตรง ๆ เรื่อง scale: สำหรับ request ทุกไม่กี่วินาที ความต่างนี้มองไม่เห็นเลย มันจะสำคัญตอนที่คุณยิง **หลายพัน call ต่อวินาที** ระหว่าง service หรือส่ง payload ใหญ่ / แบบ streaming
+
+## เมื่อไรที่ **ไม่** ควรใช้ gRPC
+
+gRPC เป็น default ที่ดีมากสำหรับ microservice ภายใน แต่มันเป็นเครื่องมือที่ผิดเมื่อ:
+
+- **client เป็น browser และคุณรัน proxy ไม่ได้** browser พูด gRPC ดิบ ๆ ไม่ได้ คุณต้องมี gRPC-Web บวก proxy ที่แปลให้ (Envoy หรือตัวที่มีมาให้) สำหรับ public web API ง่าย ๆ REST มี friction น้อยกว่า
+- **คุณอยากได้ public API ที่เป็นมิตรกับ third-party** developer ภายนอกส่วนใหญ่คาดหวัง `curl`, JSON และหน้า OpenAPI gRPC ยกกำแพงให้เข้ามาใช้ยากขึ้น
+- **API เป็นแค่ CRUD ธรรมดา traffic น้อย** toolchain ของ `.proto` และการ debug แบบ binary เป็น overhead ที่คุณไม่ได้กำไรกลับมา
+- **traffic ที่คนอ่านออกเป็นข้อกำหนดที่ยืดหยุ่นไม่ได้** (บาง setup ด้าน compliance หรือ debugging) binary frame ต้องมี tooling เพิ่มถึงจะ inspect ได้
+
+<Callout title="กฎง่าย ๆ ใช้ได้จริง">
+หยิบ **gRPC มาใช้ระหว่าง service ของคุณเอง** — ที่คุณคุมทั้งสองฝั่ง อยากได้ contract แบบ type-safe และแคร์เรื่อง latency หรือ streaming หยิบ **REST มาใช้ที่ขอบระบบ** — public API, browser client และ integration ง่าย ๆ ที่ความ universal และการ `curl` ได้เป็นตัวชนะ หลายระบบใช้ทั้งคู่: gRPC ภายใน แล้วมี REST/JSON gateway หันหน้าออกสู่โลกภายนอก (pattern ที่เราจะพูดถึงในโมดูล Ecosystem)
+</Callout>
+
+export const quizVs = [
+  {
+    q: 'ความต่างเชิงมุมมองหลักระหว่าง REST กับ gRPC คืออะไร?',
+    options: [
+      'REST เร็วกว่า gRPC เสมอ',
+      'REST คิดในแง่ resource/URL; gRPC คิดในแง่ method/message',
+      'gRPC คืน error ไม่ได้',
+      'REST ต้องใช้ HTTP/2',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ข้อไหนเป็นเหตุผลจริง ๆ ที่จะเลือก REST มากกว่า gRPC?',
+    options: [
+      'คุณต้องการ bidirectional streaming แบบ first-class',
+      'คุณกำลังสร้าง public API ที่ตั้งใจให้เรียกด้วย curl จาก browser',
+      'คุณยิงหลายพัน call ต่อวินาทีระหว่าง service ภายใน',
+      'คุณอยากได้ contract ที่ถูก enforce และ codegen',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม protobuf ถึงมักประมวลผลเร็วกว่า JSON?',
+    options: [
+      'มันถูกบีบอัดด้วย gzip โดย default',
+      'field ถูกระบุด้วยหมายเลขและแพ็คเป็น binary — ไม่มีการ parse text หรือ match key',
+      'มันข้าม validation ไปเลย',
+      'มัน cache response ให้อัตโนมัติ',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'browser ต้องมีชิ้นส่วนอะไรเพิ่มถึงจะคุยกับ gRPC service ได้?',
+    options: [
+      'ไม่ต้องมีอะไร — browser พูด gRPC ได้เอง',
+      'gRPC-Web บวก proxy ที่แปลให้',
+      'TCP port ที่สอง',
+      'ตัวแปลง JSON เป็น XML',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/grpc-vs-rest" questions={quizVs} />
+
+<ProgressTracker client:visible id="grpc-foundations/grpc-vs-rest" />

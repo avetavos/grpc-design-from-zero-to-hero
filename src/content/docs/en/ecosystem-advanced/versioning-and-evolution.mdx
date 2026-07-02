@@ -1,0 +1,123 @@
+---
+title: 'Versioning & Evolution'
+description: 'Version in the package, tell additive changes from breaking ones, run versions side by side, and let buf catch breakages before they ship.'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Your API will outlive its first shape
+
+The protobuf module showed *how* the wire format tolerates change — field numbers, not names, identify data. This lesson is about the **discipline** that turns that low-level tolerance into a real versioning strategy your callers can rely on.
+
+The golden rule: **old clients and new servers must keep working, and new clients and old servers must keep working.** Everything below serves that.
+
+## Version lives in the package
+
+The convention is to put the major version in the protobuf **package** (and the file path):
+
+```proto
+package user.v1;   // user/v1/user.proto
+```
+
+When you need incompatible changes, you don't mutate `v1` — you create `user.v2` alongside it. Generated code lands in separate namespaces, so `v1` and `v2` can run in the same server at the same time, and callers migrate on their own schedule.
+
+## Additive vs breaking
+
+Most changes should be **additive** — safe because the wire format ignores what it doesn't recognize:
+
+| Safe (additive) | Breaking (needs a new version) |
+|-----------------|-------------------------------|
+| Add a new field with a new number | Change a field's number |
+| Add a new method to a service | Change a field's type |
+| Add a new enum value (usually) | Rename/reuse a removed field number |
+| Add a new message | Remove a field still in use |
+| | Rename a package, service, or method |
+
+<Mermaid title="Additive change stays in v1; incompatible change earns a v2" code={evoDiagram} />
+
+export const evoDiagram = `flowchart TB
+  v1["user.v1"] -->|add field #7,\nadd method| v1b["user.v1\n(still compatible)"]
+  v1 -->|change field type,\nremove field| v2["user.v2\n(new package,\nruns alongside v1)"]
+  client1["old client"] --> v1b
+  client2["new client"] --> v2`;
+
+## Reserve what you retire
+
+When you *do* remove a field, never let its number (or name) be reused — a future field with the same number would silently misread old data. Mark it reserved:
+
+```proto
+message User {
+  reserved 4, 7;
+  reserved "phone_number";
+  int64 id = 1;
+  string name = 2;
+}
+```
+
+This is the schema-level guardrail behind the field-number rule: the compiler now refuses to reassign `4`, `7`, or `phone_number`.
+
+## Let a tool enforce it
+
+Humans miss breaking changes in review. **`buf breaking`** compares your `.proto` against a baseline (the last released version, a git ref, or a registry) and fails CI if a change would break the wire or generated code:
+
+```bash
+buf breaking --against '.git#branch=main'
+```
+
+Wiring this into CI turns "please remember all the compatibility rules" into an automated gate — the single highest-leverage habit for a schema many teams depend on.
+
+<Callout title="The one-line takeaway">
+Put the major version in the package (`user.v1`), keep changes additive so old and new clients interoperate, and spin up `user.v2` alongside `v1` only for genuinely breaking changes. Reserve retired field numbers so they're never reused, and run `buf breaking` in CI so a machine — not a reviewer's memory — catches incompatibilities.
+</Callout>
+
+export const quizVer = [
+  {
+    q: 'Where does the convention put an API major version?',
+    options: [
+      'In an HTTP header',
+      'In the protobuf package name (e.g. user.v1)',
+      'In the field numbers',
+      'In the TLS certificate',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which change is safe (additive) and does NOT require a new version?',
+    options: [
+      'Changing a field\'s number',
+      'Adding a new field with a new number',
+      'Removing a field still in use',
+      'Renaming the service',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why do you reserve a removed field\'s number?',
+    options: [
+      'To make the message smaller',
+      'So the number can never be reused and silently misread old data',
+      'To speed up decoding',
+      'It is only for documentation',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does running `buf breaking` in CI achieve?',
+    options: [
+      'It formats your .proto files',
+      'It automatically fails the build when a change would break wire or generated-code compatibility',
+      'It deploys the new version',
+      'It generates the client stubs',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/versioning-and-evolution" questions={quizVer} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/versioning-and-evolution" />

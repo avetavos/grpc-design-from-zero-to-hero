@@ -1,0 +1,120 @@
+---
+title: 'Defining Services'
+description: 'syntax ของ service และ rpc, การตั้งชื่อ package และทำไม API version ถึงควรอยู่ใน package path'
+sidebar:
+  order: 2
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Syntax
+
+service ประกาศด้วย keyword `service` และแต่ละ method ด้วย `rpc` รูปแบบเหมือนกันเสมอ: ชื่อ, request message หนึ่งตัวในวงเล็บ, และ `returns` พร้อม response message หนึ่งตัว
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+```
+
+อ่านมันเหมือนเมนูของ call: service นี้มี 3 method แต่ละตัวมี input และ output ที่มี type ชัดเจน นั่นคือหน้าตา API ทั้งหมด — ไม่มี URL, ไม่มี verb, ไม่มี query string
+
+## หนึ่ง request และหนึ่ง response message ต่อ method
+
+สังเกตว่าทุก method รับ request message **ของตัวเอง** และ return response message **ของตัวเอง** — แม้แต่ `GetUser` ที่ในเชิงแนวคิดต้องการแค่ id นี่ตั้งใจทำ ไม่ใช่เขียนยาวเกินจำเป็น
+
+```proto
+// ทำแบบนี้ — message เฉพาะตัว
+rpc GetUser(GetUserRequest) returns (User);
+
+message GetUserRequest {
+  int64 id = 1;
+}
+```
+
+ถ้าพรุ่งนี้คุณต้องเพิ่ม "รวม user ที่ถูกลบด้วย" หรือ "เอา field ไหนกลับมาบ้าง" คุณแค่เพิ่ม field เข้าไปใน `GetUserRequest` — เป็นการเปลี่ยนที่ backward-compatible และปลอดภัย ถ้า method รับ `int64` เปล่า ๆ คุณจะไม่มีที่ให้ขยาย และการเปลี่ยน signature จะทำให้ทุก client พัง **wrapper message ให้พื้นที่ทุก method ได้ evolve** บทเรียน Designing Methods จะกลับมาที่กฎนี้แบบละเอียด
+
+## Package และการตั้งชื่อ
+
+การประกาศ `package` ทำ namespace ให้ type ของคุณเพื่อไม่ให้ชนกับ type จาก `.proto` ไฟล์อื่น และยัง map ไปเป็น namespace ใน code ที่ generate ออกมาด้วย (Go package, Python module prefix และอื่น ๆ)
+
+```proto
+package user.v1;
+```
+
+มี 2 convention ที่สำคัญ:
+
+- **ชื่อแบบ reverse-domain หรืออิงกับ product** ทำให้ package unique ทั่วโลก: `acme.user.v1`, `payments.billing.v2`
+- **ชื่อ service ใช้ PascalCase** (`UserService`), **method ใช้ PascalCase** (`GetUser`), และ **field ใช้ snake_case** (`user_id`) ตัว code generator จะแปลงเป็นสำนวนของแต่ละภาษาให้อัตโนมัติ
+
+## ใส่ version ไว้ใน package
+
+นี่คือนิสัยการออกแบบที่สำคัญที่สุดในบทเรียนนี้: **API version อยู่ใน package path** เป็น `v1`, `v2` และต่อ ๆ ไป
+
+<Mermaid title="package ที่มี version ทำให้ v1 กับ v2 อยู่ด้วยกันได้ระหว่าง migration" code={versionDiagram} />
+
+export const versionDiagram = `flowchart TB
+  v1["package user.v1\nUserService"] --> old["existing clients\nkeep calling v1"]
+  v2["package user.v2\nUserService (redesigned)"] --> new["new clients\nadopt v2"]
+  note["both run side by side\nuntil v1 is retired"]`;
+
+เพราะ `user.v1.UserService` และ `user.v2.UserService` เป็น type คนละตัวที่มีตัวตนบน wire ต่างกัน คุณจึง ship การ redesign แบบ breaking เป็น `v2` ได้ ในขณะที่ `v1` ยังให้บริการ client เดิมต่อไป ไม่ต้องมี flag-day migration ที่บังคับให้ย้ายพร้อมกัน พอ client ทุกตัวย้ายครบแล้วค่อยปลด `v1` ทิ้ง ใส่ version ไว้ตั้งแต่วันแรก — ไปเติมทีหลังจะเจ็บปวด
+
+<Callout title="สรุปหนึ่งบรรทัด">
+`service` คือรายชื่อ method `rpc` ที่ตั้งชื่อไว้ แต่ละตัวมี request และ response message เฉพาะของตัวเองเพื่อให้ขยายได้โดยไม่ทำให้ client พัง ทำ namespace ให้ type ด้วย `package` และใส่ API version ไว้ใน package path (`user.v1`) เสมอ เพื่อให้ `v2` อยู่ร่วมกับ `v1` ได้ระหว่าง migration
+</Callout>
+
+export const quizDefining = [
+  {
+    q: 'รูปแบบตายตัวของการประกาศ rpc คืออะไร?',
+    options: [
+      'ชื่อ, URL และ HTTP verb',
+      'ชื่อ, request message หนึ่งตัว และ `returns` response message หนึ่งตัว',
+      'ชื่อ และ scalar parameter กี่ตัวก็ได้',
+      'แค่ชื่อ method',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมถึงให้ GetUser ที่ง่าย ๆ มี request message ของตัวเองแทนที่จะรับ int64 เปล่า ๆ?',
+    options: [
+      'compiler บังคับให้ทำ',
+      'เพื่อให้เพิ่ม field ทีหลังได้โดยไม่ทำให้ method signature พัง',
+      'เพราะ scalar ส่งผ่าน gRPC ไม่ได้',
+      'เพื่อทำให้ message ใหญ่ขึ้นเพื่อความปลอดภัย',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'API version ควรอยู่ที่ไหน?',
+    options: [
+      'ใน HTTP header',
+      'ในชื่อ method (GetUserV1)',
+      'ใน package path (user.v1)',
+      'ใน comment',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'การใส่ version ใน package ทำให้ทำอะไรได้?',
+    options: [
+      'serialize เร็วขึ้น',
+      'ให้ v1 กับ v2 รันคู่กันได้ migration จึงไม่ต้องมี flag day',
+      'backward compatible อัตโนมัติสำหรับทุกการเปลี่ยนแปลง',
+      'binary เล็กลง',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/defining-services" questions={quizDefining} />
+
+<ProgressTracker client:visible id="service-definition/defining-services" />

@@ -1,0 +1,106 @@
+---
+title: 'Streaming'
+description: 'The four call types recap, when a stream beats many unary calls, when it does not, and how HTTP/2 makes streaming native to gRPC.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## One transport, four shapes
+
+Every gRPC call runs over a single HTTP/2 stream, and because that stream can carry a *sequence* of messages in either direction, gRPC offers four call types — not four transports, just four usage patterns of the same stream.
+
+<Mermaid title="The four gRPC call types" code={shapesDiagram} />
+
+export const shapesDiagram = `flowchart TB
+  subgraph u["Unary"]
+    direction LR
+    uc["client"] -- "1 request" --> us["server"]
+    us -- "1 response" --> uc
+  end
+  subgraph ss["Server streaming"]
+    direction LR
+    sc["client"] -- "1 request" --> sss["server"]
+    sss -- "many responses" --> sc
+  end
+  subgraph cs["Client streaming"]
+    direction LR
+    csc["client"] -- "many requests" --> css["server"]
+    css -- "1 response" --> csc
+  end
+  subgraph bd["Bidirectional"]
+    direction LR
+    bc["client"] <-- "many both ways" --> bs["server"]
+  end`;
+
+You already know unary — one request, one response, the everyday RPC. This module covers the other three, plus the flow control that keeps them healthy.
+
+## What this module covers
+
+| Lesson | Shape | Good for |
+|--------|-------|----------|
+| Server streaming | 1 request → N responses | live feeds, large result sets, progress updates |
+| Client streaming | N requests → 1 response | uploads, batching, metric ingestion |
+| Bidirectional streaming | N ↔ N | chat, multiplayer, interactive sessions |
+| Flow control & backpressure | — | keeping a fast producer from drowning a slow consumer |
+
+## When a stream beats many unary calls
+
+Reach for streaming when:
+
+- **The result set is large or unbounded** — sending 10,000 rows as one stream avoids buffering them all in memory, and the client can start processing the first row before the last is produced.
+- **Data arrives over time** — prices, events, logs. A stream lets the server push each item the moment it exists instead of the client polling.
+- **You want one long call instead of many setups** — a stream amortizes the per-call overhead across many messages.
+
+## When NOT to stream
+
+Streaming is not free, and reaching for it reflexively is a common mistake:
+
+- **A single request/response is simpler.** If you have one input and one output, use unary. A stream adds lifecycle, error-at-any-point handling, and harder retries.
+- **Streams are stateful and long-lived**, which complicates load balancing — a stream is pinned to one backend for its whole life, so it can't be rebalanced mid-flight.
+- **Retries get harder.** A unary call is trivially retryable; a half-consumed stream is not.
+
+<Callout title="The one-line takeaway">
+gRPC's four call types are all the same HTTP/2 stream used differently. Stream when data is large, unbounded, or arrives over time — and stay unary when a single request and response will do, because streams cost you in retries, statefulness, and load balancing.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What do the four gRPC call types actually share?',
+    options: [
+      'Four different network protocols',
+      'One HTTP/2 stream used in different patterns',
+      'A REST gateway',
+      'A shared database connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which is the strongest reason to choose streaming over repeated unary calls?',
+    options: [
+      'It is always faster for a single value',
+      'The result set is large/unbounded or data arrives over time',
+      'It removes the need for a .proto',
+      'It makes retries trivial',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why can streaming complicate load balancing?',
+    options: [
+      'Streams use UDP',
+      'A stream is pinned to one backend for its whole lifetime and cannot be rebalanced mid-flight',
+      'Streams disable TLS',
+      'Load balancers cannot see HTTP/2',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="streaming/index" />

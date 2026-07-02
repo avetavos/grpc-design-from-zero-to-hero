@@ -1,0 +1,82 @@
+---
+title: 'gRPC Foundations'
+description: 'gRPC คืออะไร, RPC mental model, ทำไมต้องทำงานบน HTTP/2 และเทียบกับ REST อย่างไร — พื้นฐานของทุกอย่างที่จะตามมา'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## แนวคิดในประโยคเดียว
+
+**gRPC ทำให้โปรแกรมหนึ่งเรียก function ในอีกโปรแกรมหนึ่ง — ที่รันอยู่บนอีกเครื่องหนึ่ง — เหมือนเรียก function ในเครื่องตัวเอง** คุณนิยาม function และข้อมูลของมันครั้งเดียวในไฟล์ `.proto` แล้ว gRPC จะ generate code ฝั่ง client และ server ที่ทำให้ network หายไปจากสายตา
+
+นี่คือทั้งหมดที่ gRPC สัญญาไว้: คุณเขียน `stub.GetUser(id)` แล้ว request จะวิ่งข้าม network ไปรันบน server และคืนผลลัพธ์แบบมี type กลับมา — ไม่มี URL, ไม่ต้อง parse JSON, ไม่ต้องเขียน HTTP เอง
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียนรู้ |
+|--------|-------------------|
+| What is gRPC? | RPC model, `.proto` contract และ workflow แบบ generate-แล้ว-call |
+| gRPC vs REST | แต่ละแบบเหมาะกับอะไร, trade-off จริง ๆ และคำแนะนำตรง ๆ ในการเลือก |
+| HTTP/2 & gRPC | ทำไม gRPC ต้องใช้ HTTP/2 — multiplexing, stream และ binary framing |
+| Protocol Buffers intro | แนวคิด contract-first และทำไม binary schema ดีกว่า JSON แบบตามใจ |
+
+## ทำไมต้องเริ่มที่นี่
+
+ทุกหัวข้อที่ตามมา — streaming, deadline, interceptor, load balancing — ล้วนเป็นผลจากการตัดสินใจออกแบบ 2 อย่างที่ gRPC เลือกไว้ตั้งแต่ต้น:
+
+<Mermaid title="สองรากฐานที่ทุกอย่างต่อยอดขึ้นมา" code={foundationDiagram} />
+
+export const foundationDiagram = `flowchart TB
+  proto["Protocol Buffers\n(contract-first schema)"] --> gen["Generated stubs\n(typed client + server)"]
+  http2["HTTP/2\n(multiplexed, streaming, binary)"] --> transport["หนึ่ง connection,\nหลาย call พร้อมกัน"]
+  gen --> grpc["gRPC"]
+  transport --> grpc
+  grpc --> features["streaming · deadlines ·\ninterceptors · load balancing"]`;
+
+เข้าใจสองอย่างนี้ — **binary contract** และ **multiplexed transport** — แล้วส่วนที่เหลือของ gRPC จะเลิกดูเหมือนเวทมนตร์ และกลายเป็นผลลัพธ์ที่เห็นแล้วรู้เลยว่าทำไมต้องเป็นแบบนั้น
+
+<Callout title="การเปลี่ยนมุมมอง">
+REST ทำให้คุณคิดในแง่ **resource และ URL** (`GET /users/42`) ส่วน gRPC ทำให้คุณคิดในแง่ **method และ message** (`GetUser(GetUserRequest)`) ไม่มีอันไหนดีกว่าเสมอไป — แต่โมเดลแบบเรียก method นี่แหละคือเหตุผลที่ gRPC รู้สึกเป็นธรรมชาติสำหรับการเรียกกันระหว่าง service และทำไม tooling ถึง generate อะไรให้คุณได้เยอะขนาดนั้น
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'แนวคิดหลักของ gRPC คืออะไร?',
+    options: [
+      'วิธีเสิร์ฟหน้า HTML ที่เร็วขึ้น',
+      'การเรียก function ในอีก process/เครื่องหนึ่งเหมือนเรียกในเครื่องตัวเอง โดยอิงจาก contract ร่วมกัน',
+      'protocol สำหรับทำ database replication',
+      'ตัว validate JSON schema',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'การตัดสินใจออกแบบพื้นฐาน 2 อย่างที่ gRPC สร้างขึ้นมาคืออะไร?',
+    options: [
+      'XML และ SOAP',
+      'binary contract (Protocol Buffers) และ multiplexed transport (HTTP/2)',
+      'REST verb และ status code',
+      'WebSocket และ JSON',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ใน gRPC คุณคิดในแง่อะไรเป็นหลัก?',
+    options: [
+      'resource และ URL',
+      'method และ message',
+      'ไฟล์และโฟลเดอร์',
+      'table และ row',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="grpc-foundations/index" />

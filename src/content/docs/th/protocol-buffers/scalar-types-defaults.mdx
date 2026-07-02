@@ -1,0 +1,120 @@
+---
+title: 'Scalar Types & Defaults'
+description: 'scalar type ที่มีมาให้และวิธีเลือก, default value ของ proto3 และกับดัก "แยก unset กับ zero ไม่ออก" ที่ optional keyword แก้ให้'
+sidebar:
+  order: 3
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## scalar type
+
+protobuf มี scalar type มาให้ชุดเล็ก ๆ จุดที่ต้องเลือกให้ดีคือกลุ่ม integer ซึ่งควรเลือกจาก **การ encode** ไม่ใช่แค่ช่วงค่า
+
+| proto type | ใช้กับ | หมายเหตุ |
+|------------|-----------|-------|
+| `int32` / `int64` | integer ทั่วไป | ความยาวแปรผัน; **ไม่คุ้มกับค่าติดลบ** |
+| `uint32` / `uint64` | ค่าที่ไม่มีทางติดลบ | ความยาวแปรผัน |
+| `sint32` / `sint64` | integer ที่ **ติดลบบ่อย** | ZigZag encoding — เล็กกว่ามากสำหรับค่าติดลบ |
+| `fixed32` / `fixed64` | ค่าที่มักจะใหญ่ | 4/8 byte คงที่; ชนะ varint เมื่อค่าเกิน ~2^28 |
+| `float` / `double` | ค่าทศนิยม | 4 / 8 byte |
+| `bool` | จริง / เท็จ | 1 byte |
+| `string` | ข้อความ UTF-8 | ต้องเป็น UTF-8 ที่ถูกต้อง |
+| `bytes` | binary อะไรก็ได้ | ลำดับ byte แบบไหนก็ได้ |
+
+จุดละเอียด: `int32`/`int64` ใช้ encoding แบบ **varint** ซึ่งกะทัดรัดสำหรับเลขบวกน้อย ๆ แต่เปลือง byte กับค่าติดลบ ถ้า field ติดลบเป็นประจำให้ใช้ `sint32`/`sint64` ถ้าเป็นเลขใหญ่แบบสุ่ม (เช่น hash) `fixed64` จะเลี่ยง overhead ของ varint
+
+## default value ของ proto3
+
+ใน proto3 ทุก field มี **default** และ field ที่ไม่เคยถูก set จะแยกไม่ออกจาก field ที่ถูก set เป็นค่า default นั้นพอดี
+
+| Type | Default |
+|------|---------|
+| ตัวเลข | `0` |
+| `bool` | `false` |
+| `string` | `""` (ว่าง) |
+| `bytes` | ว่าง |
+| `enum` | value แรก (ต้องเป็น `0`) |
+| message | ไม่ถูก set (คล้าย `null`) |
+
+และนี่คือกับดักที่ทำเอาทุกคนงง
+
+## ปัญหา "unset กับ zero"
+
+scalar ของ proto3 แบบธรรมดาบอกไม่ได้ว่า *"field นี้ถูกส่งมาไหม?"* — มันบอกได้แค่ value และ field ที่หายไปจะอ่านได้เป็น default
+
+<Mermaid title="ไม่มี presence ทำให้ absent กับ zero เหมือนกัน" code={presenceDiagram} />
+
+export const presenceDiagram = `flowchart TB
+  a["client ไม่ส่ง 'age'"] --> z["server อ่าน age = 0"]
+  b["client ส่ง age = 0"] --> z
+  z --> q["server แยกไม่ออก\nว่าเกิดกรณีไหน"]`;
+
+ลองนึกถึง `UpdateUser` request ที่มี `int32 age = 5` ถ้า client อยาก *ล้าง* age มันจะส่ง `0` — แต่ client ที่แค่ไม่ยุ่งกับ age *ก็ส่ง* `0` เหมือนกัน server แยกไม่ออกว่า "set เป็นศูนย์" กับ "ไม่ได้ส่งมา" สำหรับ partial update ความกำกวมนี้คือ bug จริง ๆ
+
+## `optional` เอา presence กลับมา
+
+ภายหลัง proto3 นำ **field presence** กลับมาผ่าน keyword `optional` scalar ที่เป็น `optional` จะ track ว่ามันถูก set ชัด ๆ หรือไม่ ทำให้ generated code มี `has_age()` / `hasAge` ให้เช็ก
+
+```proto
+message UpdateUserRequest {
+  int64           id  = 1;
+  optional int32  age = 5;   // ตอนนี้แยกได้: set กับ unset
+}
+```
+
+หยิบ `optional` มาใช้เมื่อ "ไม่ได้ส่งมา" ต้องต่างจาก "ค่า zero" — เคสคลาสสิกคือ **partial update (แบบ PATCH)** และ setting ที่ `0`/`false`/`""` เป็นค่าที่ user เลือกได้จริง ๆ
+
+<Callout title="สรุปหนึ่งบรรทัด">
+เลือก integer type จาก *การ encode* ไม่ใช่แค่ช่วงค่า — `sint` สำหรับค่าติดลบบ่อย, `fixed` สำหรับค่าใหญ่ และจำจุดเด่นของ proto3 ไว้: scalar ธรรมดาแยก **unset** กับ **zero** ไม่ออก เมื่อความต่างนี้สำคัญ (โดยเฉพาะ partial update) ให้ mark field เป็น `optional` เพื่อได้ presence จริง ๆ
+</Callout>
+
+export const quizScalar = [
+  {
+    q: 'type ไหนเหมาะที่สุดกับ integer field ที่ติดลบบ่อย?',
+    options: [
+      'int32 (varint)',
+      'sint32 (ZigZag)',
+      'uint32',
+      'bool',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ใน proto3 default value ของ string field ที่ไม่ถูก set คืออะไร?',
+    options: [
+      'null',
+      'string ว่าง ""',
+      'คำว่า "default"',
+      'มัน throw error',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ปัญหา "unset กับ zero" คืออะไร?',
+    options: [
+      'zero ไม่ใช่ค่า protobuf ที่ถูกต้อง',
+      'scalar ธรรมดาแยก "ไม่ได้ส่งมา" กับ "set เป็น default ชัด ๆ" ไม่ออก',
+      'optional field ช้ากว่าเสมอ',
+      'enum เริ่มที่ zero ไม่ได้',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ควร mark scalar field เป็น `optional` เมื่อไร?',
+    options: [
+      'ทุก field เสมอ',
+      'เมื่อ "ไม่ได้ส่งมา" ต้องแยกออกจากค่า zero — เช่น partial update',
+      'เฉพาะ string',
+      'ไม่มีทาง — optional ถูกเอาออกใน proto3',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/scalar-types-defaults" questions={quizScalar} />
+
+<ProgressTracker client:visible id="protocol-buffers/scalar-types-defaults" />

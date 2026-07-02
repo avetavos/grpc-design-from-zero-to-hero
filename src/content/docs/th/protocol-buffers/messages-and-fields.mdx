@@ -1,0 +1,128 @@
+---
+title: 'Messages & Fields'
+description: 'syntax ของ message, ทำไมทุก field ถือ number แทนชื่อ, ช่วง field number ที่สำคัญ และ reserved keyword ที่ช่วยกันพลาด'
+sidebar:
+  order: 2
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## กายวิภาคของ message
+
+**message** คือกลุ่มของ field ที่มี type และมีชื่อ แต่ละ field มีสามส่วน: type, ชื่อ และ **field number**
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message User {
+  int64  id       = 1;
+  string name     = 2;
+  string email    = 3;
+  bool   verified = 4;
+}
+```
+
+ชื่อ (`name`, `email`) มีไว้ให้คนอ่าน `.proto` และให้ generated code ใช้ ส่วน **number** (`= 1`, `= 2`) คือสิ่งที่เดินทางบน wire จริง ๆ การแยกสองอย่างนี้คือสิ่งสำคัญที่สุดที่ต้องเข้าใจเกี่ยวกับ protobuf
+
+## wire เห็นแค่ number
+
+เวลา protobuf encode message แต่ละ field จะกลายเป็น **tag** — คือ field number รวมกับ wire type — ตามด้วย value ส่วนชื่อ field *ไม่เคยออกไปจาก `.proto` เลย*
+
+<Mermaid title="field บน wire คือ numbered tag กับ value" code={wireDiagram} />
+
+export const wireDiagram = `flowchart LR
+  field["name = \"Ada\"  (field #2)"] --> tag["tag: field 2, type length-delimited"]
+  tag --> val["value: 3 bytes 'Ada'"]
+  val --> bytes["บน wire: รวมไม่กี่ byte"]`;
+
+สิ่งนี้ให้ผลตอบแทนใหญ่สองอย่าง:
+
+- **กะทัดรัด** string `"verified"` ไม่เคยเดินทาง มีแต่ number `4` ที่เดินทาง message เล็กอยู่เสมอไม่ว่าชื่อ field จะยาวแค่ไหน
+- **rename ได้ฟรี** เปลี่ยน `name` เป็น `full_name` ใน `.proto` แล้วทุก client ยังคุยกันได้ — เพราะ wire ถือแค่ field `2` เท่านั้น ชื่อคือ documentation ส่วน number คือ contract
+
+## field number ไม่ได้สุ่มเลือก
+
+คุณเป็นคนเลือก number เอง และการเลือกมีผลทั้งเรื่อง performance และความปลอดภัย
+
+- **1–15 encode เป็น byte เดียว** (tag = number + wire type แพ็กรวมกัน) เก็บไว้ให้ field ที่มีอยู่ใน *เกือบทุก* message
+- **16–2047 ใช้สอง byte** เหมาะกับ field ที่พบไม่บ่อย
+- **19000–19999 ถูก reserve** โดยตัว protobuf เอง — ใช้ไม่ได้
+- ค่าสูงสุดคือ **536,870,911** (2^29 − 1) ซึ่งคุณไม่มีทางใช้ถึง
+
+<Callout title="กฎใช้งานจริง">
+ให้ number ต่ำ (1–15) กับ field ที่ hot และมีอยู่เสมอ เมื่อ number ถูก assign และปล่อยออกไปแล้ว ให้ถือว่ามันถาวร — value ที่มันชี้ตอนนี้เป็นส่วนหนึ่งของ wire contract ของคุณแล้ว
+</Callout>
+
+## ห้าม reuse number — ให้ reserve แทน
+
+กฎหนึ่งข้อที่กัน bug ร้ายแรงที่สุดของ protobuf: **เมื่อลบ field ห้ามให้ number ของมันถูก reuse เด็ดขาด** ถ้า client เก่ายังส่ง field `3` เป็น string แต่ server ใหม่เอา `3` ไปใช้เป็น `int64` bytes จะถูกตีความผิด — เป็น failure ที่เงียบและทำให้ข้อมูลเสีย
+
+protobuf ให้ `reserved` ไว้ล็อก number ที่ปลดระวางแล้ว (และชื่อเก่าของมันด้วย) เพื่อให้ compiler ปฏิเสธการ reuse:
+
+```proto
+message User {
+  reserved 3;               // field number เดิมของ 'email' — ห้าม reuse
+  reserved "email";         // และชื่อเดิม เพื่อดักความผิดพลาด
+
+  int64  id       = 1;
+  string name     = 2;
+  bool   verified = 4;
+}
+```
+
+ตอนนี้ใครก็ตามที่พยายามเพิ่ม field `3` ใหม่จะเจอ compile error แทนที่จะเป็น incident บน production เราจะกลับมาลงลึกเรื่องวินัยนี้ในบท *Evolving Schemas* — แต่ให้เริ่มนิสัยตั้งแต่ตอนนี้: **ลบ field แล้ว reserve number ของมัน**
+
+<Callout title="สรุปหนึ่งบรรทัด">
+message คือ field ที่มี type และตัวตนจริงของแต่ละ field คือ **number** ไม่ใช่ชื่อ number ทำให้ message กะทัดรัดและ rename ได้ฟรี — แต่ก็แปลว่า number เป็นของถาวร ให้ field ที่ hot ใช้ number byte เดียว 1–15 และเมื่อลบ field ให้ `reserved` number ของมันไว้ตลอดกาล
+</Callout>
+
+export const quizMsg = [
+  {
+    q: 'อะไรที่เดินทางบน wire จริง ๆ เพื่อระบุ field?',
+    options: [
+      'ชื่อ field เป็น string',
+      'field number (ในรูป tag) ไม่ใช่ชื่อ',
+      'hash ของชื่อ field',
+      'path เต็มใน .proto',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมควรให้ field ที่พบบ่อยที่สุดใช้ number 1–15?',
+    options: [
+      'ถูก validate เข้มกว่า',
+      'encode เป็น byte เดียว ทำให้ message เล็ก',
+      'เป็น number เดียวที่ proto3 อนุญาต',
+      'เรียงก่อนตามตัวอักษร',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'จะเกิดอะไรถ้า reuse field number ที่ลบไปแล้วกับ type อื่น?',
+    options: [
+      'compiler migrate ข้อมูลเก่าให้อัตโนมัติ',
+      'bytes เก่าถูกตีความเป็น type ใหม่ — ข้อมูลเสียแบบเงียบ ๆ',
+      'gRPC ปฏิเสธทั้ง message',
+      'ไม่มีอะไรเกิดขึ้น number เป็นแค่ของประดับ',
+    ],
+    answer: 1,
+  },
+  {
+    q: '`reserved` keyword ทำอะไร?',
+    options: [
+      'ทำให้ field เป็น required',
+      'ล็อก field number (และชื่อ) ที่ปลดระวางไม่ให้ถูก reuse อีก',
+      'จองหน่วยความจำให้ field',
+      'เข้ารหัส field บน wire',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/messages-and-fields" questions={quizMsg} />
+
+<ProgressTracker client:visible id="protocol-buffers/messages-and-fields" />

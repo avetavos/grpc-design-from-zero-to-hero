@@ -1,0 +1,128 @@
+---
+title: 'Messages & Fields'
+description: 'Message syntax, why every field carries a number instead of a name, the field-number ranges that matter, and the reserved keyword that keeps you safe.'
+sidebar:
+  order: 2
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Anatomy of a message
+
+A **message** is a named group of typed fields. Each field has three parts: a type, a name, and a **field number**.
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message User {
+  int64  id       = 1;
+  string name     = 2;
+  string email    = 3;
+  bool   verified = 4;
+}
+```
+
+The name (`name`, `email`) is for humans reading the `.proto` and for the generated code. The **number** (`= 1`, `= 2`) is what actually travels on the wire. That split is the single most important thing to internalize about protobuf.
+
+## The wire only sees numbers
+
+When protobuf encodes a message, each field becomes a **tag** — the field number combined with a wire type — followed by the value. Field *names never leave the `.proto`*.
+
+<Mermaid title="A field on the wire is a numbered tag plus a value" code={wireDiagram} />
+
+export const wireDiagram = `flowchart LR
+  field["name = \"Ada\"  (field #2)"] --> tag["tag: field 2, type length-delimited"]
+  tag --> val["value: 3 bytes 'Ada'"]
+  val --> bytes["on the wire: a few bytes total"]`;
+
+This has two big payoffs:
+
+- **Compactness.** The string `"verified"` never travels; the number `4` does. Messages stay small no matter how descriptive your field names are.
+- **Renaming is free.** Change `name` to `full_name` in the `.proto` and every client still interoperates — the wire only ever carried field `2`. Names are documentation; numbers are the contract.
+
+## Field numbers are not arbitrary
+
+You choose the numbers, and the choice has performance and safety consequences.
+
+- **1–15 encode in a single byte** (tag = number + wire type packed together). Reserve them for the fields present in *almost every* message.
+- **16–2047 take two bytes.** Fine for less common fields.
+- **19000–19999 are reserved** by protobuf itself — you cannot use them.
+- The maximum is **536,870,911** (2^29 − 1), which you will never reach.
+
+<Callout title="Practical rule">
+Give your hot, always-present fields the low numbers (1–15). Once a number is assigned and shipped, treat it as permanent — the value it identifies is now part of your wire contract.
+</Callout>
+
+## Never reuse a number — reserve it
+
+The one rule that prevents the worst protobuf bug: **when you delete a field, never let its number be reused.** If an old client still sends field `3` as a string and a new server reassigns `3` to an `int64`, the bytes get misinterpreted — a silent, corrupting failure.
+
+Protobuf gives you `reserved` to lock a retired number (and optionally its old name) so the compiler refuses to reuse it:
+
+```proto
+message User {
+  reserved 3;               // the old 'email' field number — never reuse
+  reserved "email";         // and the old name, to catch mistakes
+
+  int64  id       = 1;
+  string name     = 2;
+  bool   verified = 4;
+}
+```
+
+Now anyone who tries to add a new field `3` gets a compile error instead of a production incident. We return to this discipline in depth in the *Evolving Schemas* lesson — but the habit starts here: **delete a field, reserve its number.**
+
+<Callout title="The one-line takeaway">
+A message is typed fields, and each field's real identity is its **number**, not its name. Numbers make messages compact and renames free — but they also mean a number is permanent. Give hot fields the single-byte numbers 1–15, and when you remove a field, `reserved` its number forever.
+</Callout>
+
+export const quizMsg = [
+  {
+    q: 'What actually travels on the wire to identify a field?',
+    options: [
+      'The field name as a string',
+      'The field number (as a tag), not the name',
+      'A hash of the field name',
+      'The full .proto path',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why give your most common fields numbers 1–15?',
+    options: [
+      'They are validated more strictly',
+      'They encode in a single byte, keeping messages small',
+      'They are the only numbers allowed in proto3',
+      'They sort first alphabetically',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What happens if you reuse a deleted field number for a different type?',
+    options: [
+      'The compiler automatically migrates old data',
+      'Old bytes get misinterpreted as the new type — a silent corruption',
+      'gRPC rejects the whole message',
+      'Nothing, numbers are only cosmetic',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does the `reserved` keyword do?',
+    options: [
+      'Marks a field as required',
+      'Locks a retired field number (and name) so it can never be reused',
+      'Pre-allocates memory for a field',
+      'Encrypts a field on the wire',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/messages-and-fields" questions={quizMsg} />
+
+<ProgressTracker client:visible id="protocol-buffers/messages-and-fields" />

@@ -1,0 +1,120 @@
+---
+title: 'Defining Services'
+description: 'The service and rpc syntax, package naming, and why the API version belongs in the package path.'
+sidebar:
+  order: 2
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The syntax
+
+A service is declared with the `service` keyword, and each method with `rpc`. The shape is always the same: a name, one request message in parentheses, and `returns` with one response message.
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+```
+
+Read it as a menu of calls: this service offers three methods, each with a typed input and a typed output. That's the entire API surface — no URLs, no verbs, no query strings.
+
+## One request and one response message per method
+
+Notice that every method takes its **own** request message and returns its **own** response message — even `GetUser`, which conceptually just needs an id. This is deliberate, not verbose for its own sake:
+
+```proto
+// Do this — dedicated messages
+rpc GetUser(GetUserRequest) returns (User);
+
+message GetUserRequest {
+  int64 id = 1;
+}
+```
+
+If tomorrow you need to add "include deleted users" or "which fields to return", you add a field to `GetUserRequest` — a safe, backward-compatible change. Had the method taken a bare `int64`, you'd have no place to grow, and changing the signature would break every client. **Wrapper messages give every method room to evolve.** The Designing Methods lesson returns to this rule in depth.
+
+## Packages and naming
+
+The `package` declaration namespaces your types so they don't collide with types from other `.proto` files. It also maps to a namespace in the generated code (a Go package, a Python module prefix, and so on).
+
+```proto
+package user.v1;
+```
+
+Two conventions matter:
+
+- **Reverse-domain or product-scoped names** keep packages globally unique: `acme.user.v1`, `payments.billing.v2`.
+- **Service names use PascalCase** (`UserService`), **methods use PascalCase** (`GetUser`), and **fields use snake_case** (`user_id`). The code generators translate these into each language's idioms automatically.
+
+## Put the version in the package
+
+This is the single most important design habit in this lesson: **the API version lives in the package path**, as `v1`, `v2`, and so on.
+
+<Mermaid title="Versioned packages let v1 and v2 coexist during a migration" code={versionDiagram} />
+
+export const versionDiagram = `flowchart TB
+  v1["package user.v1\nUserService"] --> old["existing clients\nkeep calling v1"]
+  v2["package user.v2\nUserService (redesigned)"] --> new["new clients\nadopt v2"]
+  note["both run side by side\nuntil v1 is retired"]`;
+
+Because `user.v1.UserService` and `user.v2.UserService` are distinct types with distinct wire identities, you can ship a breaking redesign as `v2` while `v1` keeps serving existing clients. There is no forced flag-day migration. When every client has moved, you retire `v1`. Bake the version in from day one — retrofitting it later is painful.
+
+<Callout title="The one-line takeaway">
+A `service` is a named list of `rpc` methods, each with a dedicated request and response message so it can grow without breaking clients. Namespace types with a `package`, and always put the API version in the package path (`user.v1`) so a `v2` can coexist with `v1` during migrations.
+</Callout>
+
+export const quizDefining = [
+  {
+    q: 'What is the fixed shape of an rpc declaration?',
+    options: [
+      'A name, a URL, and an HTTP verb',
+      'A name, one request message, and `returns` one response message',
+      'A name and any number of scalar parameters',
+      'Just a method name',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why give even a simple GetUser its own request message instead of a bare int64?',
+    options: [
+      'It is required by the compiler',
+      'So you can add fields later without breaking the method signature',
+      'Because scalars cannot be sent over gRPC',
+      'To make the message larger for security',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Where should the API version live?',
+    options: [
+      'In an HTTP header',
+      'In the method name (GetUserV1)',
+      'In the package path (user.v1)',
+      'In a comment',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'What does versioning in the package enable?',
+    options: [
+      'Faster serialization',
+      'v1 and v2 to run side by side so migrations need no flag day',
+      'Automatic backward compatibility for any change',
+      'Smaller binaries',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/defining-services" questions={quizDefining} />
+
+<ProgressTracker client:visible id="service-definition/defining-services" />

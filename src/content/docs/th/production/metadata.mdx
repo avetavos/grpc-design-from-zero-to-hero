@@ -1,0 +1,141 @@
+---
+title: 'Metadata'
+description: 'header และ trailer แบบ key/value ที่เดินทางไปพร้อม call — auth token, trace id, request id — วิธีอ่านและเขียน และวิธีที่มัน propagate'
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## ข้อมูลเกี่ยวกับ call ไม่ใช่ข้อมูลใน message
+
+request และ response message ถือข้อมูล *domain* ของคุณ — user, order แต่ข้อมูลบางอย่างเป็นเรื่อง *เกี่ยวกับตัว call เอง*: ใครเป็นคนเรียก, มันอยู่ใน trace ไหน, จะ log ด้วย request id อะไร ถ้าเอาพวกนี้ยัดเข้าไปในทุก message มันจะทำให้ schema รก gRPC ให้ช่องแยกต่างหาก: **metadata**
+
+metadata คือชุดของคู่ key/value ที่ส่งไปพร้อม call เหมือน HTTP header เป๊ะ — ซึ่งจริง ๆ แล้วมันก็กลายเป็น header บน HTTP/2 wire นั่นเอง
+
+## header และ trailer
+
+metadata มาในสองตำแหน่ง:
+
+- **header** เดินทาง *ก่อน* message ตอนเริ่ม call ที่นี่คือที่ที่ client ใส่ auth token หรือ trace id — อะไรก็ตามที่ server ต้องรู้ตั้งแต่ต้น
+- **trailer** เดินทาง *หลัง* response ตอนจบ call ที่นี่คือที่ที่ server ใส่ข้อมูลที่รู้ก็ต่อเมื่อทำงานเสร็จแล้ว — เช่น รายละเอียด status สุดท้ายหรือ metrics ฝั่ง server response แบบ streaming พึ่ง trailer เป็นพิเศษ เพราะ status รู้ได้ก็หลัง message สุดท้ายเท่านั้น
+
+<Mermaid title="ตำแหน่งของ header และ trailer ใน call" code={mdDiagram} />
+
+export const mdDiagram = `flowchart LR
+  client["client"] -->|"headers: authorization, x-trace-id"| server["server"]
+  server -->|"response message(s)"| client
+  server -->|"trailers: final status, metrics"| client`;
+
+## อ่านและเขียน metadata
+
+client ตั้ง header ก่อน call; server อ่านมัน และส่ง header กับ trailer กลับได้
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // Client: attach metadata to the outgoing call.
+    ctx := metadata.AppendToOutgoingContext(ctx,
+        "authorization", "Bearer "+token,
+        "x-request-id", reqID,
+    )
+    resp, err := client.GetUser(ctx, req)
+
+    // Server: read incoming metadata.
+    md, _ := metadata.FromIncomingContext(ctx)
+    reqID := md.Get("x-request-id")
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Client: pass metadata as a list of (key, value) tuples.
+    metadata = [("authorization", f"Bearer {token}"), ("x-request-id", req_id)]
+    resp = client.GetUser(request, metadata=metadata)
+
+    # Server: read it off the context.
+    def GetUser(self, request, context):
+        incoming = dict(context.invocation_metadata())
+        req_id = incoming.get("x-request-id")
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // Client: build a Metadata object.
+    const md = new Metadata();
+    md.set('authorization', `Bearer ${token}`);
+    md.set('x-request-id', reqId);
+    client.getUser(request, md, (err, resp) => { /* ... */ });
+
+    // Server: read it off the call.
+    function getUser(call, callback) {
+      const reqId = call.metadata.get('x-request-id')[0];
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## กฎและ convention
+
+- **key เป็นตัวพิมพ์เล็ก** gRPC normalize key ของ metadata เป็น lowercase ASCII; ให้ปฏิบัติแบบ case-insensitive
+- **value แบบ binary ใช้ suffix `-bin`** key ที่ลงท้ายด้วย `-bin` (เช่น `trace-context-bin`) ถูกมองเป็น raw bytes และ base64-encode บน wire ส่วนอย่างอื่นต้องเป็น ASCII string ที่ถูกต้อง
+- **อย่าใช้ key ที่สงวนไว้ซ้ำ** key ที่ขึ้นต้นด้วย `grpc-` ถูกสงวนโดย framework — อย่าตั้งเอง
+- **metadata ไม่ได้เข้ารหัสในตัวมันเอง** — ความเป็นส่วนตัวมาจาก TLS บน channel token ใน metadata บน channel ที่ insecure ถือว่าเปิดเผย
+
+## การ propagate ข้าม call chain
+
+metadata คือวิธีที่ context ไหลผ่าน chain ของ service เมื่อ service A เรียก B ที่เรียก C คุณมักจะ **propagate** trace id และ request id: แต่ละ hop อ่าน metadata ขาเข้าและ copy key ที่เกี่ยวข้องไปยัง call ขาออก ปกติทำใน interceptor เพื่อไม่ให้ handler ต้องจำ นั่นคือวิธีที่ distributed trace ยังเชื่อมกันได้ข้าม gRPC หลาย hop
+
+<Callout title="สรุปหนึ่งบรรทัด">
+metadata คือช่องข้าง key/value สำหรับข้อมูล *เกี่ยวกับ* call — auth token และ trace id เป็น **header** ตอนต้น, รายละเอียด status สุดท้ายเป็น **trailer** ตอนจบ key เป็นตัวพิมพ์เล็ก, key `-bin` ถือ raw bytes และความเป็นส่วนตัวมาจาก TLS การ propagate trace และ request id ผ่าน metadata (ปกติใน interceptor) คือสิ่งที่ทำให้ distributed trace ยังต่อกันได้ข้าม service
+</Callout>
+
+export const quizMd = [
+  {
+    q: 'metadata ใน gRPC ใช้ทำอะไร?',
+    options: [
+      'เก็บข้อมูล domain หลักของ request',
+      'ถือข้อมูลเกี่ยวกับ call — auth token, trace id, request id — ไปพร้อม message',
+      'นิยาม .proto schema',
+      'บีบอัด payload',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ความต่างระหว่าง header กับ trailer คืออะไร?',
+    options: [
+      'header เป็น binary, trailer เป็น text',
+      'header เดินทางก่อน message; trailer เดินทางหลัง response (เช่น status สุดท้าย)',
+      'trailer มีแค่สำหรับ client',
+      'ไม่มีความต่าง',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'key ของ metadata ที่ลงท้ายด้วย `-bin` หมายความว่าอะไร?',
+    options: [
+      'เป็น key ที่เลิกใช้แล้ว',
+      'value ของมันถูกมองเป็น raw bytes และ base64-encode บน wire',
+      'ถูกบีบอัดสองครั้ง',
+      'ถูกสงวนโดย framework',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'trace id ยังต่อกันได้ข้าม A → B → C ได้ยังไง?',
+    options: [
+      'gRPC copy metadata ทั้งหมดอัตโนมัติตลอดไป',
+      'แต่ละ hop propagate trace/request id จาก metadata ขาเข้าไปขาออก ปกติใน interceptor',
+      'database เป็นตัว join มัน',
+      'มันถูกเก็บใน .proto',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/metadata" questions={quizMd} />
+
+<ProgressTracker client:visible id="production/metadata" />

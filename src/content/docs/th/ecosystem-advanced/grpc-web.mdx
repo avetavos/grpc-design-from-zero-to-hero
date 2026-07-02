@@ -1,0 +1,139 @@
+---
+title: 'gRPC-Web'
+description: 'ทำไม browser พูด gRPC แบบ native ไม่ได้, gRPC-Web protocol กับ proxy มาอุดช่องว่างนี้อย่างไร และ Connect ทำให้เรื่องทั้งหมดทันสมัยขึ้นอย่างไร'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## browser ทำไม่ได้
+
+gRPC แบบ native ต้องควบคุม HTTP/2 frame อย่างละเอียด — trailer, flow control และ framing ดิบ ๆ ที่เราเห็นในโมดูล foundations แต่ browser `fetch` API ตั้งใจซ่อนทั้งหมดนั้นไว้ JavaScript ในหน้าเว็บ**เปิด** raw HTTP/2 stream แล้วเขียน gRPC frame ลงไปไม่ได้เลย
+
+ดังนั้น browser เรียก gRPC server ตรง ๆ ไม่ได้ นี่ไม่ใช่ bug ที่ config แก้ได้ แต่เป็นขอบเขตของสิ่งที่ browser API เปิดให้ทำ
+
+## gRPC-Web: dialect ที่เป็นมิตรกับ browser
+
+**gRPC-Web** คือ variant ของ protocol ที่ออกแบบให้อยู่ในสิ่งที่ browser *ทำได้* มันขน protobuf message เดิม แต่ frame ให้รอดผ่าน HTTP request ปกติ — รวมถึง encode trailer (ที่ gRPC ใช้ใส่ status code) ลงไปใน response body เพราะ browser อ่าน HTTP/2 trailer ไม่ได้
+
+จุดที่ต้องระวัง: request แบบ gRPC-Web ไม่ใช่ byte ชุดเดียวกับ request แบบ native gRPC ต้องมีอะไรสักอย่างมาแปลระหว่างสองแบบนี้
+
+## คุณต้องมี proxy
+
+ตัวแปลนั้นอยู่ระหว่าง browser กับ gRPC service ของคุณ:
+
+<Mermaid title="browser เข้าถึง gRPC ผ่าน proxy ที่ทำหน้าที่แปล" code={webDiagram} />
+
+export const webDiagram = `flowchart LR
+  browser["browser\ngRPC-Web client"] -->|gRPC-Web\nover HTTP/1.1 or /2| proxy["proxy\n(Envoy / in-process)"]
+  proxy -->|native gRPC\nover HTTP/2| backend["gRPC backend"]
+  backend --> proxy --> browser`;
+
+สองวิธีที่พบบ่อยในการรัน proxy นั้น:
+
+- **Envoy** พร้อม gRPC-Web filter — edge proxy เฉพาะทางที่แปล gRPC-Web เป็น native gRPC เหมาะเมื่อคุณรัน Envoy อยู่แล้ว
+- **In-process handler** — หลาย stack (grpc-web wrapper ของ Go และอื่น ๆ) ให้ gRPC server รับ gRPC-Web ได้ตรง ๆ โดยไม่ต้องมี proxy แยก
+
+ฝั่ง client คุณใช้ gRPC-Web stub ที่ generate มาแทน native stub:
+
+<Tabs syncKey="lang">
+  <TabItem label="Node">
+    ```ts
+    // Browser (gRPC-Web) — generated client talks to the proxy URL
+    import { UserServiceClient } from './gen/user.client';
+    import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
+
+    const transport = new GrpcWebFetchTransport({ baseUrl: 'https://api.example.com' });
+    const client = new UserServiceClient(transport);
+
+    const { response } = await client.getUser({ id: 42 });
+    console.log(response.name);
+    ```
+  </TabItem>
+  <TabItem label="Go">
+    ```go
+    // Server-side: let the same gRPC server also accept gRPC-Web
+    grpcServer := grpc.NewServer()
+    userv1.RegisterUserServiceServer(grpcServer, &server{})
+
+    wrapped := grpcweb.WrapServer(grpcServer) // accepts gRPC-Web requests
+    http.ListenAndServe(":8080", wrapped)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Python has no browser runtime; front Python gRPC services with
+    # Envoy configured with the grpc_web filter to serve browsers.
+    # envoy.yaml (excerpt):
+    #   http_filters:
+    #     - name: envoy.filters.http.grpc_web
+    #     - name: envoy.filters.http.router
+    ```
+  </TabItem>
+</Tabs>
+
+## Connect: ทางเลือกที่ทันสมัยกว่า
+
+**Connect** (จาก Buf) คือแนวทางใหม่ที่พูดได้ 3 protocol จาก server เดียว: Connect protocol ของตัวเอง, gRPC และ gRPC-Web โดย Connect protocol ทำงานบน HTTP/1.1 ธรรมดาและขน JSON ได้ ทำให้ browser — หรือแม้แต่ `curl` — เรียกได้โดยไม่ต้องมี proxy เลย ขณะที่ backend service ยังใช้ gRPC อยู่ สำหรับงานใหม่ที่หันหน้าเข้า browser Connect ตัด friction ของ gRPC-Web ออกไปเกือบหมด
+
+## มันมีผลต่อการออกแบบยังไง
+
+- **วางแผน proxy ตั้งแต่วันแรก** ถ้ามี browser เป็น client gRPC-Web ไม่ใช่ glue ที่ค่อยเพิ่มทีหลัง แต่เป็นทางเดียวที่เข้าได้
+- **streaming ถูกจำกัด** gRPC-Web รองรับ unary และ server-streaming ได้ดี แต่ client-streaming และ bidirectional streaming ยังใช้บน browser ไม่ได้ทั่วไป
+- **พิจารณา Connect** สำหรับ browser-facing API ที่เริ่มใหม่ — server เดียว, 3 protocol, ไม่ต้องมี proxy แยก
+
+<Callout title="สรุปหนึ่งบรรทัด">
+browser เขียน raw HTTP/2 frame ไม่ได้ จึงพูด native gRPC ไม่ได้ gRPC-Web คือ dialect ที่ browser ใช้ได้ โดยมี proxy (Envoy หรือ in-process) แปลเป็น native gRPC — และรองรับแค่ unary กับ server-streaming ส่วน Connect คือทางเลือกทันสมัยที่ serve gRPC, gRPC-Web และ protocol ที่เป็นมิตรกับ browser จาก server เดียว
+</Callout>
+
+export const quizWeb = [
+  {
+    q: 'ทำไม browser เรียก native gRPC server ตรง ๆ ไม่ได้?',
+    options: [
+      'gRPC โดน CORS block',
+      'browser fetch API ไม่เปิด raw HTTP/2 framing ที่ native gRPC ต้องใช้',
+      'browser รองรับแค่ XML',
+      'gRPC ต้องมี database connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'อะไรอยู่ระหว่าง gRPC-Web browser client กับ native gRPC service?',
+    options: [
+      'proxy ที่ทำหน้าที่แปล เช่น Envoy หรือ in-process wrapper',
+      'message queue',
+      'database ตัวที่สอง',
+      'ไม่มีอะไร — เชื่อมตรงกันเลย',
+    ],
+    answer: 0,
+  },
+  {
+    q: 'gRPC-Web รองรับ streaming แบบไหนบน browser โดยทั่วไป?',
+    options: [
+      'ครบทั้ง 4 แบบ เหมือน native gRPC',
+      'unary และ server-streaming ส่วน client และ bidirectional streaming ยังใช้ไม่ได้ทั่วไป',
+      'เฉพาะ bidirectional streaming',
+      'ไม่รองรับเลย — gRPC-Web เป็นแบบ request อย่างเดียว',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'อะไรทำให้ Connect น่าใช้สำหรับ browser-facing API ใหม่ ๆ?',
+    options: [
+      'มันตัดความจำเป็นของ `.proto` ออก',
+      'server เดียวพูด gRPC, gRPC-Web และ protocol ที่เป็นมิตรกับ browser บน HTTP/1.1 — ไม่ต้องมี proxy แยก',
+      'มันเร็วกว่า native gRPC ฝั่ง backend',
+      'มันแปลง protobuf เป็น XML',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/grpc-web" questions={quizWeb} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/grpc-web" />

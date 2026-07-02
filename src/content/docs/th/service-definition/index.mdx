@@ -1,0 +1,82 @@
+---
+title: 'Service Definition'
+description: 'เปลี่ยน schema ให้กลายเป็น API — การนิยาม service, RPC ทั้ง 4 แบบ, การออกแบบ method signature และ error model ของ gRPC'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## จาก message สู่ API
+
+โมดูล Protocol Buffers ให้ **คำนาม** กับคุณไปแล้ว — message คือรูปร่างของข้อมูล โมดูลนี้ให้ **คำกริยา**: `service` คือกลุ่มของ method (`rpc`) ที่ตั้งชื่อไว้ และแต่ละ method รับ request message เข้าไปหนึ่งตัว ส่ง response message ออกมาหนึ่งตัว
+
+การตัดสินใจแค่จุดเดียวนี้ — *method ไม่ใช่ resource* — คือสิ่งที่ทำให้ฝั่ง client รู้สึกเหมือนเรียก function ในเครื่องตัวเอง ในโมดูลนี้ทุกอย่างมารวมกันเป็นหน้าตา API จริง ๆ
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียนรู้ |
+|--------|-------------------|
+| Defining Services | syntax ของ `service` และ `rpc`, การตั้งชื่อ package และการทำ API versioning ใน package path |
+| The Four RPC Types | unary, server-streaming, client-streaming, bidirectional — และ message flow ของแต่ละแบบ |
+| Designing Methods | wrapper request/response message, การตั้งชื่อ, pagination และ idempotency |
+| Errors & Status Codes | status code model และ rich error ด้วย `google.rpc.Status` |
+
+## service คือ contract ของพฤติกรรม
+
+<Mermaid title="service รวม method หลายตัว แต่ละ method map request ไปเป็น response" code={serviceDiagram} />
+
+export const serviceDiagram = `flowchart LR
+  subgraph svc["service UserService"]
+    m1["rpc GetUser(GetUserRequest) → User"]
+    m2["rpc CreateUser(CreateUserRequest) → User"]
+    m3["rpc ListUsers(ListUsersRequest) → ListUsersResponse"]
+  end
+  client["client stub"] -->|calls| svc
+  svc -->|typed response| client`;
+
+พอจบโมดูลนี้ คุณจะอ่าน service block ใน `.proto` ตัวไหนก็ได้แล้วรู้ทันทีว่ามันมี call อะไรบ้าง อันไหน stream และมันรายงาน failure อย่างไร
+
+<Callout title="วิธีคิด">
+message ตอบคำถามว่า "ข้อมูลหน้าตาเป็นยังไง?" ส่วน **service** ตอบว่า "ฉัน *ทำ* อะไรได้บ้าง?" ออกแบบ service ให้ดี — ชื่อ method ชัดเจน, request/response message เฉพาะของแต่ละ method, error code ที่ตรงไปตรงมา — แล้ว client ที่ generate ออกมาจะใช้งานสนุก ออกแบบมั่ว ๆ แล้วทุกคนที่เรียกใช้จะจ่ายราคานั้นไปตลอด
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'gRPC `service` คืออะไร?',
+    options: [
+      'process ของ server ที่กำลังรันอยู่',
+      'กลุ่มของ method (rpc) ที่ตั้งชื่อไว้ แต่ละตัว map request message ไปเป็น response message',
+      'protobuf message ตัวเดียว',
+      'config ของ load balancer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'unary rpc หนึ่งตัวรับและส่ง message กี่ตัว?',
+    options: [
+      'กี่ตัวก็ได้ทั้งสองฝั่ง',
+      'รับ request message หนึ่งตัว ส่ง response message หนึ่งตัว',
+      'ศูนย์ตัว — ใช้ URL parameter แทน',
+      'request หนึ่งตัว แต่ response หลายตัวเสมอ',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'อะไรคือกรอบคิดที่ทำให้ gRPC service ต่างจาก REST?',
+    options: [
+      'resource และ URL',
+      'method และ message',
+      'file และ folder',
+      'queue และ topic',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="service-definition/index" />

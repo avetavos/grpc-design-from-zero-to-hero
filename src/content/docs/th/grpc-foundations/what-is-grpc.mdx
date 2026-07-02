@@ -1,0 +1,167 @@
+---
+title: 'What Is gRPC?'
+description: 'RPC mental model, .proto contract และ workflow แบบ generate-แล้ว-call ที่เปลี่ยน schema ให้กลายเป็น client และ server ที่มี type'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Remote Procedure Call
+
+**gRPC** ย่อมาจาก *gRPC Remote Procedure Call* (ใช่ มันเป็น recursive) ส่วนที่สำคัญคือ **RPC**: แนวคิดว่าการเรียก code บนอีกเครื่องหนึ่งควรจะดูเหมือนการเรียก function ปกติ
+
+ถ้าไม่มี RPC การเรียกกันระหว่าง service หมายถึง: สร้าง URL, เลือก verb, serialize body เป็น JSON, ส่ง HTTP request, เช็ค status code, parse response และภาวนาว่าทั้งสองฝั่งตกลงเรื่องรูปร่างข้อมูลตรงกัน RPC ยุบทั้งหมดนั้นให้เหลือบรรทัดเดียว:
+
+```text
+user = userService.GetUser(id: 42)
+```
+
+คุณเรียก method คุณได้ผลลัพธ์ที่มี type ส่วน transport, serialization และ error handling ถูก generate ให้และซ่อนอยู่หลัง call นั้น
+
+## contract มาก่อน
+
+สิ่งที่ทำให้เรื่องนี้เป็นไปได้คือ **contract** ที่เขียนก่อนจะ implement อะไรทั้งนั้น — ไฟล์ `.proto` มันประกาศ message (ข้อมูล) และ service (method):
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message GetUserRequest {
+  int64 id = 1;
+}
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+}
+```
+
+ไฟล์นี้คือ single source of truth และเป็นกลางไม่ผูกกับภาษา: `.proto` ตัวเดียวกันสร้าง Go server, Python client และ Node service ที่คุยกันได้อย่างสมบูรณ์ เพราะทั้งหมด generate มาจากการประกาศชุดเดียวกัน
+
+## generate แล้วค่อย call
+
+workflow มี 3 ขั้น และมีแค่ขั้นกลางเท่านั้นที่เป็น code ที่คุณเขียนเอง:
+
+<Mermaid title="จาก contract ไปสู่ call ที่รันได้จริง" code={workflowDiagram} />
+
+export const workflowDiagram = `flowchart LR
+  proto[".proto contract"] -->|protoc| stubs["generated stubs\n(client + server)"]
+  stubs --> impl["คุณ implement\nmethod ฝั่ง server"]
+  impl --> run["client เรียก\nstub.GetUser(42)"]
+  run -->|HTTP/2 + protobuf| server["server รัน\nGetUser, คืน User"]
+  server --> run`;
+
+1. **เขียน `.proto`** แล้วรัน `protoc` (protobuf compiler) เพื่อ generate stub ที่มี type
+2. **implement server** — เติมเนื้อในของ `GetUser`
+3. **call จาก client** — เรียก method ของ stub ที่ generate มา; request จะถูก serialize เป็น protobuf, ส่งผ่าน HTTP/2 แล้ว response ที่มี type ก็กลับมา
+
+นี่คือ call ฝั่ง client ใน 3 ภาษา สังเกตว่ามันสั้นแค่ไหน: ไม่มี URL, ไม่มี JSON, ไม่ต้องเช็ค status code — แค่เรียก method
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, _ := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    defer conn.Close()
+    client := userv1.NewUserServiceClient(conn)
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(user.Name) // typed field, no JSON parsing
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel("localhost:50051")
+    client = user_pb2_grpc.UserServiceStub(channel)
+
+    user = client.GetUser(user_pb2.GetUserRequest(id=42))
+    print(user.name)  # typed field, no JSON parsing
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const client = new UserServiceClient(
+      'localhost:50051',
+      credentials.createInsecure(),
+    );
+
+    client.getUser({ id: 42 }, (err, user) => {
+      if (err) throw err;
+      console.log(user.name); // typed field, no JSON parsing
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## สิ่งที่ gRPC ให้คุณฟรี ๆ
+
+เพราะทุกอย่างไหลมาจาก contract framework จึงยื่นอะไรให้คุณได้เยอะ:
+
+- **type safety ข้าม wire** — client กับ server ขัดแย้งกันเรื่องชื่อ field หรือ type ไม่ได้ เพราะ generate มาจาก schema เดียวกัน
+- **binary encoding ที่มีประสิทธิภาพ** — protobuf เล็กกว่าและ parse เร็วกว่า JSON
+- **streaming** — โมเดลเดียวกันขยายไปสู่การส่ง message จำนวนมากได้ทั้งสองทิศทาง (มีทั้งโมดูลรออยู่ข้างหน้า)
+- **interop ข้ามภาษา** — ภาษาทางการ 11+ ภาษา คุยกันด้วย protocol เดียวกัน
+- **feature ที่มีมาให้ในตัว** — deadline, cancellation, metadata, interceptor และ load balancing มากับ framework ไม่ใช่สิ่งที่คุณต้องคิดค้นใหม่
+
+<Callout title="สรุปในบรรทัดเดียว">
+gRPC คือ RPC แบบ contract-first: คุณประกาศ message และ method ใน `.proto`, generate code ฝั่ง client และ server ที่มี type แล้ว network call ก็หน้าตาเหมือน `client.GetUser(42)` schema คือ source of truth — และนั่นคือสิ่งที่ทำให้ type safety, codegen และ interop ข้ามภาษาเป็นไปได้
+</Callout>
+
+export const quizWhat = [
+  {
+    q: 'คำว่า "RPC" ใน gRPC มีความหมายอย่างไรต่อวิธีที่คุณเขียน code?',
+    options: [
+      'คุณสร้าง URL และ parse JSON เอง',
+      'การเรียก code บนอีกเครื่องหนึ่งดูเหมือนการเรียก function ในเครื่องตัวเอง',
+      'คุณต้องเขียน HTTP/2 frame ดิบ ๆ เอง',
+      'คุณ replicate database ข้าม node',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ใน workflow ของ gRPC อะไรคือ single source of truth?',
+    options: [
+      'code ฝั่ง client',
+      'code ฝั่ง server',
+      '`.proto` contract',
+      'config ของ load balancer',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'ทำไม Go server กับ Python client ถึงคุยกันได้อย่างสมบูรณ์ใน gRPC?',
+    options: [
+      'มัน share runtime กัน',
+      'ทั้งคู่ generate มาจาก `.proto` contract เดียวกัน',
+      'Python compile เป็น Go',
+      'ทั้งคู่ใช้ JSON ภายใน',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ข้อไหนที่ gRPC ให้คุณโดยไม่ต้องทำงานเพิ่ม?',
+    options: [
+      'database index อัตโนมัติ',
+      'type safety ข้าม wire, binary encoding, deadline และ streaming',
+      'การ render HTML ฝั่ง server',
+      'message broker ในตัว',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/what-is-grpc" questions={quizWhat} />
+
+<ProgressTracker client:visible id="grpc-foundations/what-is-grpc" />

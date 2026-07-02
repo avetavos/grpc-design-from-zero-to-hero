@@ -1,0 +1,195 @@
+---
+title: 'Server Streaming'
+description: 'One request, a stream of responses — the shape for live feeds, large result sets, and progress updates, with the send and receive loops in three languages.'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## One request in, many responses out
+
+**Server streaming** is the shape where the client sends a single request and the server replies with a *sequence* of messages over one open stream. The client reads them one at a time until the server signals it is done.
+
+It is the natural fit whenever the answer is not a single value but a series: watching events as they happen, streaming a large result set row by row, or reporting the progress of a long job.
+
+<Mermaid title="Server streaming: one request, a stream of responses" code={ssDiagram} />
+
+export const ssDiagram = `sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: WatchPrices(symbol: "ACME")
+  S-->>C: Price 10.20
+  S-->>C: Price 10.24
+  S-->>C: Price 10.19
+  S-->>C: ... (until server closes)
+  Note over C,S: server ends the stream, client's loop finishes`;
+
+## The contract
+
+You mark the **response** as a stream with the `stream` keyword. The request stays singular:
+
+```proto
+syntax = "proto3";
+package market.v1;
+
+message WatchRequest {
+  string symbol = 1;
+}
+
+message Price {
+  string symbol = 1;
+  double value  = 2;
+  int64  ts     = 3;
+}
+
+service Market {
+  // One request, a stream of Price responses.
+  rpc WatchPrices(WatchRequest) returns (stream Price);
+}
+```
+
+That single `stream` keyword changes the generated code: instead of returning one `Price`, the server gets a stream to send many, and the client gets an iterator to read many.
+
+## Server: send in a loop
+
+The server implementation receives the request, then calls "send" repeatedly. When the method returns, the stream is closed.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func (s *server) WatchPrices(req *marketv1.WatchRequest, stream marketv1.Market_WatchPricesServer) error {
+        for i := 0; i < 5; i++ {
+            price := &marketv1.Price{Symbol: req.Symbol, Value: 10 + float64(i)*0.01}
+            if err := stream.Send(price); err != nil {
+                return err // client went away
+            }
+            time.Sleep(time.Second)
+        }
+        return nil // returning closes the stream
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def WatchPrices(self, request, context):
+        for i in range(5):
+            yield market_pb2.Price(symbol=request.symbol, value=10 + i * 0.01)
+            time.sleep(1)
+        # the generator ending closes the stream
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    function watchPrices(call: ServerWritableStream<WatchRequest, Price>) {
+      let i = 0;
+      const timer = setInterval(() => {
+        call.write({ symbol: call.request.symbol, value: 10 + i * 0.01 });
+        if (++i === 5) {
+          clearInterval(timer);
+          call.end(); // closes the stream
+        }
+      }, 1000);
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Client: read until done
+
+The client makes one call and iterates the responses. The loop ends when the server closes the stream.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    stream, _ := client.WatchPrices(ctx, &marketv1.WatchRequest{Symbol: "ACME"})
+    for {
+        price, err := stream.Recv()
+        if err == io.EOF {
+            break // server closed the stream
+        }
+        if err != nil {
+            log.Fatal(err)
+        }
+        fmt.Println(price.Value)
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    for price in client.WatchPrices(market_pb2.WatchRequest(symbol="ACME")):
+        print(price.value)
+    # loop ends when the server closes the stream
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const call = client.watchPrices({ symbol: 'ACME' });
+    call.on('data', (price: Price) => console.log(price.value));
+    call.on('end', () => console.log('server closed the stream'));
+    call.on('error', (err) => console.error(err));
+    ```
+  </TabItem>
+</Tabs>
+
+## Design notes
+
+- **Messages arrive in order.** Within a single stream, gRPC guarantees the client reads messages in the exact order the server sent them.
+- **Set a deadline.** A server stream can run a long time; the client should still bound it with a deadline or cancel it when it stops caring (covered in the deadlines lesson).
+- **Errors can arrive mid-stream.** After several good messages, the server can still end with an error status. Handle the error branch of your receive loop, not just the happy path.
+- **The server should respect cancellation.** If the client disconnects, `Send` returns an error — stop producing instead of looping forever.
+
+<Callout title="The one-line takeaway">
+Server streaming is one request and a `stream` of responses: the server sends in a loop and the client reads until EOF. Use it for live feeds, large result sets, and progress — and remember messages are ordered, errors can arrive mid-stream, and the server must stop when the client cancels.
+</Callout>
+
+export const quizSS = [
+  {
+    q: 'What does `returns (stream Price)` change in a service method?',
+    options: [
+      'It compresses the response',
+      'The server can send many Price messages over one open stream instead of one',
+      'It makes the call use UDP',
+      'It disables the request message',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'On the client, how does a server-streaming call normally end?',
+    options: [
+      'After a fixed 30 seconds',
+      'When the server closes the stream (the receive loop hits EOF/end)',
+      'When the client sends a second request',
+      'It never ends',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which guarantee does gRPC make about messages within one stream?',
+    options: [
+      'They may arrive in any order',
+      'They arrive in the exact order the sender sent them',
+      'Duplicates are automatically removed',
+      'They are delivered exactly once across retries',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What should a server do when the client cancels a server-streaming call?',
+    options: [
+      'Keep sending — the messages are buffered',
+      'Stop producing; Send returns an error once the client is gone',
+      'Restart the stream from the beginning',
+      'Switch to a unary response',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/server-streaming" questions={quizSS} />
+
+<ProgressTracker client:visible id="streaming/server-streaming" />

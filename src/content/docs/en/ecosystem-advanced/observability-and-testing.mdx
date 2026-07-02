@@ -1,0 +1,147 @@
+---
+title: 'Observability & Testing'
+description: 'Inspect running services with reflection, add metrics and traces through interceptors, test with in-process servers, and benchmark gRPC vs REST honestly.'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## You can't `curl` a binary protocol
+
+Protobuf's efficiency costs you human-readability. You can't eyeball a gRPC call the way you can a REST request. So the ecosystem replaces "read the traffic" with **reflection**, **interceptor-based telemetry**, and **in-process tests**.
+
+## Reflection: explore a live server
+
+**Server reflection** lets a server describe its own services and messages at runtime, so a tool can call methods without having the `.proto` on hand. With it enabled, `grpcurl` becomes your `curl` for gRPC:
+
+```bash
+# List services on a running server, then call one — no local .proto needed
+grpcurl -plaintext localhost:50051 list
+grpcurl -plaintext -d '{"id": 42}' localhost:50051 user.v1.UserService/GetUser
+```
+
+Enable reflection in non-production or behind auth — it's what makes a running server explorable.
+
+## Telemetry rides on interceptors
+
+You already met interceptors as the place for cross-cutting concerns. Observability is their biggest use: one interceptor chain adds **metrics** (latency, request counts, status codes), **traces** (spans that follow a call across services), and structured **logs** — for every method, without touching handler code.
+
+<Mermaid title="One interceptor chain makes every method observable" code={obsDiagram} />
+
+export const obsDiagram = `flowchart LR
+  call["incoming RPC"] --> mw["interceptor chain"]
+  mw --> m["metrics\n(latency, count, code)"]
+  mw --> t["trace span\n(propagate context)"]
+  mw --> l["structured log"]
+  mw --> handler["your handler"]`;
+
+The standard path is **OpenTelemetry** instrumentation, which ships as ready-made gRPC interceptors in every major language — you register them once and get metrics and distributed traces across your whole fleet.
+
+## Test in-process, not over the network
+
+Spinning up real ports makes tests slow and flaky. gRPC lets you run a real server and client **in memory**, exercising the full serialization and interceptor path with no network:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // bufconn: a real gRPC server over an in-memory listener
+    lis := bufconn.Listen(1024 * 1024)
+    s := grpc.NewServer()
+    userv1.RegisterUserServiceServer(s, &server{})
+    go s.Serve(lis)
+
+    conn, _ := grpc.NewClient("passthrough:///bufnet",
+        grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+            return lis.DialContext(ctx)
+        }),
+        grpc.WithTransportCredentials(insecure.NewCredentials()))
+    client := userv1.NewUserServiceClient(conn)
+    got, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Start a real server on an ephemeral port inside the test
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    user_pb2_grpc.add_UserServiceServicer_to_server(Servicer(), server)
+    port = server.add_insecure_port("localhost:0")
+    server.start()
+
+    channel = grpc.insecure_channel(f"localhost:{port}")
+    client = user_pb2_grpc.UserServiceStub(channel)
+    got = client.GetUser(user_pb2.GetUserRequest(id=42))
+    server.stop(None)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // Bind to port 0, let the OS pick a free port, connect to it
+    const server = new Server();
+    server.addService(UserServiceService, new UserServiceImpl());
+    server.bindAsync('localhost:0', ServerCredentials.createInsecure(), (_e, port) => {
+      const client = new UserServiceClient(`localhost:${port}`, credentials.createInsecure());
+      client.getUser({ id: 42 }, (err, user) => { /* assert */ });
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## Benchmark honestly
+
+gRPC is usually faster than REST/JSON for high-volume, small, structured calls — less bytes, cheaper decode, multiplexed connections. But measure *your* workload: for occasional calls or large already-compressed blobs, the difference can be negligible, and REST's tooling may win overall. Benchmark with realistic payloads and concurrency, not a toy loop, before making it a selling point.
+
+<Callout title="The one-line takeaway">
+Because you can't read binary traffic, gRPC gives you reflection (so `grpcurl` can explore a live server), interceptor-based OpenTelemetry for metrics and traces across the fleet, and in-process servers (Go bufconn / ephemeral ports) for fast, network-free tests. And when you claim gRPC is faster than REST, prove it on your real payloads and concurrency.
+</Callout>
+
+export const quizObs = [
+  {
+    q: 'What does server reflection enable?',
+    options: [
+      'Automatic retries on failure',
+      'A tool like grpcurl to discover and call methods without a local .proto',
+      'Encryption of all messages',
+      'Faster protobuf decoding',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Where do metrics, traces, and logs naturally attach in gRPC?',
+    options: [
+      'Inside every handler, copy-pasted',
+      'In an interceptor chain, applied to every method at once',
+      'In the .proto file',
+      'In the load balancer only',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why test with an in-process server (e.g. Go bufconn or an ephemeral port)?',
+    options: [
+      'It skips serialization entirely',
+      'It exercises the real server, client, and interceptor path with no slow, flaky network',
+      'It is the only way to test streaming',
+      'It requires no .proto',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the honest stance on "gRPC is faster than REST"?',
+    options: [
+      'It is always dramatically faster in every case',
+      'It is usually faster for high-volume small structured calls, but you should benchmark your real workload',
+      'It is always slower',
+      'Performance never depends on payload or concurrency',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/observability-and-testing" questions={quizObs} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/observability-and-testing" />

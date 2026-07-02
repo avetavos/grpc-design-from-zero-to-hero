@@ -1,0 +1,82 @@
+---
+title: 'Service Definition'
+description: 'Turning a schema into an API — defining services, the four RPC types, designing method signatures, and the gRPC error model.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## From messages to an API
+
+The Protocol Buffers module gave you the **nouns** — messages, the shape of your data. This module gives you the **verbs**: a `service` is a named group of methods (`rpc`s), and each method is one request message in, one response message out.
+
+That single decision — *methods, not resources* — is what makes the client feel like a local function call. Here everything comes together into an actual API surface.
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| Defining Services | `service` and `rpc` syntax, package naming, and API versioning in the package path |
+| The Four RPC Types | Unary, server-streaming, client-streaming, bidirectional — and the message flow of each |
+| Designing Methods | Wrapper request/response messages, naming, pagination, and idempotency |
+| Errors & Status Codes | The status code model and rich errors with `google.rpc.Status` |
+
+## A service is a contract for behavior
+
+<Mermaid title="A service groups methods; each method maps a request to a response" code={serviceDiagram} />
+
+export const serviceDiagram = `flowchart LR
+  subgraph svc["service UserService"]
+    m1["rpc GetUser(GetUserRequest) → User"]
+    m2["rpc CreateUser(CreateUserRequest) → User"]
+    m3["rpc ListUsers(ListUsersRequest) → ListUsersResponse"]
+  end
+  client["client stub"] -->|calls| svc
+  svc -->|typed response| client`;
+
+By the end of this module you'll be able to read any `.proto` service block and know exactly what calls it offers, which of them stream, and how it reports failure.
+
+<Callout title="The mental model">
+A message answers "what does the data look like?" A **service** answers "what can I *do*?" Design the service well — clear method names, dedicated request/response messages, honest error codes — and the generated client becomes a joy to use. Design it carelessly and every consumer pays for it forever.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What is a gRPC `service`?',
+    options: [
+      'A running server process',
+      'A named group of methods (rpcs), each mapping a request message to a response message',
+      'A single protobuf message',
+      'A load balancer configuration',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How many messages does a single unary rpc take and return?',
+    options: [
+      'Any number of each',
+      'One request message in, one response message out',
+      'Zero — it uses URL parameters',
+      'One request, but many responses always',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What design framing distinguishes gRPC services from REST?',
+    options: [
+      'Resources and URLs',
+      'Methods and messages',
+      'Files and folders',
+      'Queues and topics',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="service-definition/index" />

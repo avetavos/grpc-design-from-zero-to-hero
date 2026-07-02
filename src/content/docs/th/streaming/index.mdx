@@ -1,0 +1,106 @@
+---
+title: 'Streaming'
+description: 'สรุป call ทั้ง 4 แบบ, เมื่อไร stream ดีกว่า unary หลาย ๆ call, เมื่อไรไม่ควรใช้ และ HTTP/2 ทำให้ streaming เป็นเรื่องธรรมชาติของ gRPC อย่างไร'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## transport เดียว 4 รูปแบบ
+
+ทุก gRPC call วิ่งบน HTTP/2 stream เส้นเดียว และเพราะ stream นั้นส่ง message เป็น *ลำดับ* ได้ทั้งสองทิศทาง gRPC จึงมี call ให้เลือก 4 แบบ — ไม่ใช่ transport 4 อัน แค่รูปแบบการใช้ stream เดียวกัน 4 แบบ
+
+<Mermaid title="gRPC call ทั้ง 4 แบบ" code={shapesDiagram} />
+
+export const shapesDiagram = `flowchart TB
+  subgraph u["Unary"]
+    direction LR
+    uc["client"] -- "1 request" --> us["server"]
+    us -- "1 response" --> uc
+  end
+  subgraph ss["Server streaming"]
+    direction LR
+    sc["client"] -- "1 request" --> sss["server"]
+    sss -- "many responses" --> sc
+  end
+  subgraph cs["Client streaming"]
+    direction LR
+    csc["client"] -- "many requests" --> css["server"]
+    css -- "1 response" --> csc
+  end
+  subgraph bd["Bidirectional"]
+    direction LR
+    bc["client"] <-- "many both ways" --> bs["server"]
+  end`;
+
+unary คุณรู้จักอยู่แล้ว — 1 request 1 response คือ RPC ที่ใช้ทุกวัน โมดูลนี้ครอบคลุมอีก 3 แบบที่เหลือ พร้อม flow control ที่ทำให้มันทำงานได้ดี
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | รูปแบบ | เหมาะกับ |
+|--------|-------|----------|
+| Server streaming | 1 request → N responses | live feed, result set ขนาดใหญ่, progress update |
+| Client streaming | N requests → 1 response | upload, batching, การรับ metric |
+| Bidirectional streaming | N ↔ N | chat, multiplayer, session แบบโต้ตอบ |
+| Flow control & backpressure | — | กัน producer ที่เร็วไม่ให้ท่วม consumer ที่ช้า |
+
+## เมื่อไร stream ดีกว่า unary หลาย ๆ call
+
+ใช้ streaming เมื่อ:
+
+- **result set ใหญ่หรือไม่จำกัด** — ส่ง 10,000 row เป็น stream เดียวช่วยไม่ต้อง buffer ทั้งหมดไว้ใน memory และ client เริ่มประมวลผล row แรกได้ก่อนที่ row สุดท้ายจะถูกสร้าง
+- **data ทยอยมาตามเวลา** — price, event, log สั่งให้ server push แต่ละ item ทันทีที่มันเกิด แทนที่ client จะ poll
+- **อยากได้ call ยาว 1 call แทนการ setup หลายครั้ง** — stream เฉลี่ย overhead ต่อ call ไปกับ message จำนวนมาก
+
+## เมื่อไร**ไม่**ควร stream
+
+streaming ไม่ฟรี และการหยิบมาใช้แบบอัตโนมัติเป็นความผิดพลาดที่พบบ่อย:
+
+- **request/response เดียวเรียบง่ายกว่า** ถ้ามี input เดียว output เดียว ใช้ unary เถอะ stream เพิ่ม lifecycle, การ handle error ที่เกิดได้ทุกจุด และ retry ที่ยากขึ้น
+- **stream มี state และอยู่ยาว** ซึ่งทำให้ load balancing ยุ่งยาก — stream ถูกผูกกับ backend เดียวตลอดอายุของมัน rebalance กลางทางไม่ได้
+- **retry ยากขึ้น** unary call retry ง่ายมาก แต่ stream ที่บริโภคไปครึ่งทางแล้ว retry ไม่ได้ง่าย ๆ
+
+<Callout title="สรุปหนึ่งบรรทัด">
+gRPC call ทั้ง 4 แบบคือ HTTP/2 stream เดียวกันที่ใช้ต่างรูปแบบ ใช้ stream เมื่อ data ใหญ่ ไม่จำกัด หรือทยอยมาตามเวลา — และอยู่กับ unary เมื่อ request/response เดียวก็พอ เพราะ stream ต้องแลกด้วย retry, statefulness และ load balancing ที่ยากขึ้น
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'gRPC call ทั้ง 4 แบบมีอะไรร่วมกันจริง ๆ?',
+    options: [
+      'network protocol 4 แบบที่ต่างกัน',
+      'HTTP/2 stream เดียวที่ใช้ต่างรูปแบบกัน',
+      'REST gateway',
+      'database connection ที่แชร์กัน',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เหตุผลที่หนักแน่นที่สุดในการเลือก streaming แทน unary call ซ้ำ ๆ คืออะไร?',
+    options: [
+      'มันเร็วกว่าเสมอสำหรับค่าเดียว',
+      'result set ใหญ่/ไม่จำกัด หรือ data ทยอยมาตามเวลา',
+      'มันตัดความจำเป็นของ .proto ออกไป',
+      'มันทำให้ retry ง่ายมาก',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม streaming ถึงทำให้ load balancing ยุ่งยาก?',
+    options: [
+      'stream ใช้ UDP',
+      'stream ถูกผูกกับ backend เดียวตลอดอายุ และ rebalance กลางทางไม่ได้',
+      'stream ปิด TLS',
+      'load balancer มองไม่เห็น HTTP/2',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="streaming/index" />

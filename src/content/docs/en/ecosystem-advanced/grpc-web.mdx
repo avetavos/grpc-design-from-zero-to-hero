@@ -1,0 +1,139 @@
+---
+title: 'gRPC-Web'
+description: 'Why browsers cannot speak native gRPC, how the gRPC-Web protocol and a proxy bridge the gap, and how Connect modernizes the whole story.'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The browser can't do it
+
+Native gRPC needs precise control over HTTP/2 frames — trailers, flow control, and the raw framing we saw in the foundations module. The browser `fetch` API deliberately hides all of that. JavaScript in a page simply **cannot** open a raw HTTP/2 stream and write gRPC frames onto it.
+
+So a browser cannot call a gRPC server directly. That is not a bug you can configure around; it is a boundary of what browser APIs expose.
+
+## gRPC-Web: a browser-friendly dialect
+
+**gRPC-Web** is a variant of the protocol designed to fit inside what browsers *can* do. It carries the same protobuf messages, but frames them so they survive a normal HTTP request — including encoding trailers (where gRPC puts its status code) into the response body, since browsers can't read HTTP/2 trailers.
+
+The catch: a gRPC-Web request is not the same bytes as a native gRPC request. Something has to translate between them.
+
+## You need a proxy
+
+That translator sits between the browser and your gRPC services:
+
+<Mermaid title="A browser reaches gRPC through a translating proxy" code={webDiagram} />
+
+export const webDiagram = `flowchart LR
+  browser["browser\ngRPC-Web client"] -->|gRPC-Web\nover HTTP/1.1 or /2| proxy["proxy\n(Envoy / in-process)"]
+  proxy -->|native gRPC\nover HTTP/2| backend["gRPC backend"]
+  backend --> proxy --> browser`;
+
+Two common ways to run that proxy:
+
+- **Envoy** with the gRPC-Web filter — a dedicated edge proxy that translates gRPC-Web to native gRPC. Common when you already run Envoy.
+- **In-process handlers** — many stacks (Go's `grpc-web` wrapper, others) let the gRPC server also accept gRPC-Web directly, no separate proxy needed.
+
+On the client, you use a generated gRPC-Web stub instead of the native one:
+
+<Tabs syncKey="lang">
+  <TabItem label="Node">
+    ```ts
+    // Browser (gRPC-Web) — generated client talks to the proxy URL
+    import { UserServiceClient } from './gen/user.client';
+    import { GrpcWebFetchTransport } from '@protobuf-ts/grpcweb-transport';
+
+    const transport = new GrpcWebFetchTransport({ baseUrl: 'https://api.example.com' });
+    const client = new UserServiceClient(transport);
+
+    const { response } = await client.getUser({ id: 42 });
+    console.log(response.name);
+    ```
+  </TabItem>
+  <TabItem label="Go">
+    ```go
+    // Server-side: let the same gRPC server also accept gRPC-Web
+    grpcServer := grpc.NewServer()
+    userv1.RegisterUserServiceServer(grpcServer, &server{})
+
+    wrapped := grpcweb.WrapServer(grpcServer) // accepts gRPC-Web requests
+    http.ListenAndServe(":8080", wrapped)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Python has no browser runtime; front Python gRPC services with
+    # Envoy configured with the grpc_web filter to serve browsers.
+    # envoy.yaml (excerpt):
+    #   http_filters:
+    #     - name: envoy.filters.http.grpc_web
+    #     - name: envoy.filters.http.router
+    ```
+  </TabItem>
+</Tabs>
+
+## Connect: the modern alternative
+
+**Connect** (from Buf) is a newer take that speaks three protocols from one server: its own simple Connect protocol, gRPC, and gRPC-Web. Its Connect protocol works over plain HTTP/1.1 and can carry JSON, so a browser — or even `curl` — can call it with no proxy at all, while backend services still use gRPC. For new browser-facing work, Connect removes most of the gRPC-Web friction.
+
+## What it means for your design
+
+- **Plan the proxy from day one** if a browser is a client. gRPC-Web is not optional glue you add later; it's the only way in.
+- **Streaming is limited.** gRPC-Web supports unary and server-streaming well; client-streaming and bidirectional streaming are not generally available in browsers.
+- **Consider Connect** for greenfield browser APIs — one server, three protocols, no separate proxy.
+
+<Callout title="The one-line takeaway">
+Browsers can't write raw HTTP/2 frames, so they can't speak native gRPC. gRPC-Web is a browser-safe dialect that a proxy (Envoy or in-process) translates to native gRPC — with only unary and server-streaming supported. Connect is the modern option that serves gRPC, gRPC-Web, and a browser-friendly protocol from one server.
+</Callout>
+
+export const quizWeb = [
+  {
+    q: 'Why can a browser not call a native gRPC server directly?',
+    options: [
+      'gRPC is blocked by CORS',
+      'The browser fetch API does not expose raw HTTP/2 framing that native gRPC needs',
+      'Browsers only support XML',
+      'gRPC requires a database connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What sits between a gRPC-Web browser client and native gRPC services?',
+    options: [
+      'A translating proxy such as Envoy or an in-process wrapper',
+      'A message queue',
+      'A second database',
+      'Nothing — they connect directly',
+    ],
+    answer: 0,
+  },
+  {
+    q: 'Which streaming modes does gRPC-Web generally support in browsers?',
+    options: [
+      'All four, identically to native gRPC',
+      'Unary and server-streaming; client and bidirectional streaming are not generally available',
+      'Only bidirectional streaming',
+      'None — gRPC-Web is request-only with no streaming',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What makes Connect attractive for new browser-facing APIs?',
+    options: [
+      'It removes the need for a .proto',
+      'One server speaks gRPC, gRPC-Web, and a browser-friendly protocol over HTTP/1.1 — no separate proxy',
+      'It is faster than native gRPC on the backend',
+      'It converts protobuf to XML',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/grpc-web" questions={quizWeb} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/grpc-web" />

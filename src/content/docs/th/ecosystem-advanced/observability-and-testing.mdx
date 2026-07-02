@@ -1,0 +1,147 @@
+---
+title: 'Observability & Testing'
+description: 'ส่องดู service ที่รันอยู่ด้วย reflection, เพิ่ม metrics กับ traces ผ่าน interceptor, test ด้วย in-process server และ benchmark gRPC vs REST อย่างตรงไปตรงมา'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## `curl` ดู binary protocol ไม่ได้
+
+ความเร็วของ protobuf แลกมาด้วยการอ่านด้วยตาไม่ออก คุณมอง gRPC call ด้วยตาแบบที่มอง REST request ไม่ได้ ecosystem จึงแทน "อ่าน traffic" ด้วย **reflection**, **telemetry ที่อยู่บน interceptor** และ **in-process test**
+
+## Reflection: สำรวจ server ที่รันอยู่
+
+**Server reflection** ให้ server อธิบาย service และ message ของตัวเองตอน runtime ได้ ทำให้เครื่องมือเรียก method ได้โดยไม่ต้องมี `.proto` ในมือ เมื่อเปิดใช้ `grpcurl` จะกลายเป็น `curl` ของ gRPC:
+
+```bash
+# List services on a running server, then call one — no local .proto needed
+grpcurl -plaintext localhost:50051 list
+grpcurl -plaintext -d '{"id": 42}' localhost:50051 user.v1.UserService/GetUser
+```
+
+เปิด reflection ใน non-production หรือหลัง auth — มันคือสิ่งที่ทำให้ server ที่รันอยู่สำรวจได้
+
+## telemetry อยู่บน interceptor
+
+คุณเจอ interceptor มาแล้วในฐานะที่ ๆ ใส่ cross-cutting concern observability คือการใช้งานที่ใหญ่ที่สุดของมัน: interceptor chain เดียวเพิ่ม **metrics** (latency, จำนวน request, status code), **traces** (span ที่ตาม call ข้าม service) และ **log** แบบมีโครงสร้าง — ให้ทุก method โดยไม่แตะ handler code
+
+<Mermaid title="interceptor chain เดียวทำให้ทุก method observe ได้" code={obsDiagram} />
+
+export const obsDiagram = `flowchart LR
+  call["incoming RPC"] --> mw["interceptor chain"]
+  mw --> m["metrics\n(latency, count, code)"]
+  mw --> t["trace span\n(propagate context)"]
+  mw --> l["structured log"]
+  mw --> handler["your handler"]`;
+
+เส้นทางมาตรฐานคือ instrumentation แบบ **OpenTelemetry** ซึ่งมาเป็น gRPC interceptor สำเร็จรูปในทุกภาษาหลัก — register ครั้งเดียวแล้วได้ metrics และ distributed trace ทั่วทั้ง fleet
+
+## test แบบ in-process ไม่ใช่ผ่าน network
+
+การเปิด port จริงทำให้ test ช้าและ flaky gRPC ให้คุณรัน server และ client จริง **ใน memory** ได้ โดยผ่านทั้งเส้นทาง serialization และ interceptor เต็ม ๆ โดยไม่มี network:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // bufconn: a real gRPC server over an in-memory listener
+    lis := bufconn.Listen(1024 * 1024)
+    s := grpc.NewServer()
+    userv1.RegisterUserServiceServer(s, &server{})
+    go s.Serve(lis)
+
+    conn, _ := grpc.NewClient("passthrough:///bufnet",
+        grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+            return lis.DialContext(ctx)
+        }),
+        grpc.WithTransportCredentials(insecure.NewCredentials()))
+    client := userv1.NewUserServiceClient(conn)
+    got, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Start a real server on an ephemeral port inside the test
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    user_pb2_grpc.add_UserServiceServicer_to_server(Servicer(), server)
+    port = server.add_insecure_port("localhost:0")
+    server.start()
+
+    channel = grpc.insecure_channel(f"localhost:{port}")
+    client = user_pb2_grpc.UserServiceStub(channel)
+    got = client.GetUser(user_pb2.GetUserRequest(id=42))
+    server.stop(None)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // Bind to port 0, let the OS pick a free port, connect to it
+    const server = new Server();
+    server.addService(UserServiceService, new UserServiceImpl());
+    server.bindAsync('localhost:0', ServerCredentials.createInsecure(), (_e, port) => {
+      const client = new UserServiceClient(`localhost:${port}`, credentials.createInsecure());
+      client.getUser({ id: 42 }, (err, user) => { /* assert */ });
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## benchmark อย่างตรงไปตรงมา
+
+gRPC มักเร็วกว่า REST/JSON สำหรับ call ที่ปริมาณสูง ขนาดเล็ก และมีโครงสร้าง — byte น้อยกว่า, decode ถูกกว่า, connection แบบ multiplex แต่ต้องวัดกับ workload *ของคุณเอง*: สำหรับ call นาน ๆ ที ครั้งหรือ blob ใหญ่ที่ถูก compress มาแล้ว ความต่างอาจแทบไม่มี และ tooling ของ REST อาจชนะโดยรวม benchmark ด้วย payload และ concurrency ที่สมจริง ไม่ใช่ loop ของเล่น ก่อนจะเอาไปเป็นจุดขาย
+
+<Callout title="สรุปหนึ่งบรรทัด">
+เพราะอ่าน binary traffic ไม่ได้ gRPC จึงให้ reflection (ให้ `grpcurl` สำรวจ server ที่รันอยู่), OpenTelemetry บน interceptor สำหรับ metrics และ traces ทั่ว fleet และ in-process server (Go bufconn / ephemeral port) สำหรับ test ที่เร็วและไม่มี network และเมื่อคุณอ้างว่า gRPC เร็วกว่า REST จง prove บน payload และ concurrency จริงของคุณ
+</Callout>
+
+export const quizObs = [
+  {
+    q: 'server reflection เปิดให้ทำอะไรได้?',
+    options: [
+      'retry อัตโนมัติเมื่อ fail',
+      'ให้เครื่องมืออย่าง grpcurl ค้นหาและเรียก method ได้โดยไม่ต้องมี `.proto` ในเครื่อง',
+      'encrypt ทุก message',
+      'decode protobuf เร็วขึ้น',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'metrics, traces และ logs เกาะเข้ากับ gRPC ตรงไหนโดยธรรมชาติ?',
+    options: [
+      'ใน handler ทุกตัว copy-paste เอา',
+      'ใน interceptor chain ที่ใช้กับทุก method พร้อมกัน',
+      'ในไฟล์ `.proto`',
+      'ใน load balancer เท่านั้น',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมต้อง test ด้วย in-process server (เช่น Go bufconn หรือ ephemeral port)?',
+    options: [
+      'มันข้าม serialization ไปเลย',
+      'มันใช้เส้นทาง server, client และ interceptor จริง โดยไม่มี network ที่ช้าและ flaky',
+      'มันเป็นวิธีเดียวที่ test streaming ได้',
+      'มันไม่ต้องใช้ `.proto`',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'จุดยืนที่ตรงไปตรงมาเรื่อง "gRPC เร็วกว่า REST" คืออะไร?',
+    options: [
+      'มันเร็วกว่าอย่างมากในทุกกรณีเสมอ',
+      'มันมักเร็วกว่าสำหรับ call ปริมาณสูงขนาดเล็กที่มีโครงสร้าง แต่ควร benchmark workload จริงของคุณ',
+      'มันช้ากว่าเสมอ',
+      'performance ไม่เคยขึ้นกับ payload หรือ concurrency',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/observability-and-testing" questions={quizObs} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/observability-and-testing" />

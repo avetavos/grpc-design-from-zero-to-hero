@@ -1,0 +1,151 @@
+---
+title: 'Load Balancing & Health'
+description: 'ทำไม L4 balancer แบบไร้เดียงสาทำ gRPC พัง, client-side load balancing กระจาย call ไปหลาย backend อย่างไร และ health checking protocol ที่ป้อนข้อมูลให้มัน'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## ปัญหา: connection เดียว call หลายอัน
+
+ทุกอย่างที่ทำให้ gRPC เร็วก็ทำให้ load balancing ยากด้วย gRPC client เปิด **connection HTTP/2 เดียวที่อยู่ยาว** แล้ว multiplex ทุก call ผ่านมัน ดีต่อ latency — แต่ **L4 (TCP) load balancer** แบบดั้งเดิม balance ที่ *connection* ไม่ใช่ request มันเลือก backend ครั้งเดียว ตอนที่ connection เปิด แล้วจากนั้นทุก call ก็วิ่งบน connection เดียวไปยัง backend ตัวเดียว
+
+<Mermaid title="L4 balancer pin ทุก call ไว้ที่ backend เดียว; client-side LB กระจายมัน" code={lbDiagram} />
+
+export const lbDiagram = `flowchart TB
+  subgraph l4["L4 (TCP) balancer — pin connection"]
+    c1["client"] -->|connection เดียว| p["L4 LB"]
+    p --> b1["backend A\n(ได้ทุกอย่าง)"]
+    b2["backend B\n(ว่าง)"]
+    b3["backend C\n(ว่าง)"]
+  end
+  subgraph csl["Client-side LB — กระจาย call"]
+    c2["client"] --> r["resolver + policy"]
+    r --> ba["backend A"]
+    r --> bb["backend B"]
+    r --> bc["backend C"]
+  end`;
+
+ผลคือ backend ตัวเดียวโดนถล่มขณะที่ตัวอื่นนั่งว่าง และ autoscaling ทำงานผิดพลาด นี่คือเรื่องเซอร์ไพรส์เรื่อง scale ของ gRPC ที่พบบ่อยที่สุด
+
+## สองวิธี balance gRPC
+
+มีสองวิธีที่ถูกต้อง:
+
+- **L7 (application-aware) proxy** — proxy ที่พูด HTTP/2 และ gRPC ได้ (Envoy, Linkerd หรือ cloud LB ที่รู้จัก gRPC) balance ทีละ *call* ไม่ใช่ connection client แค่คุยกับ proxy
+- **Client-side load balancing** — ตัว client เองรู้จัก backend ทุกตัวและกระจาย call ไปให้ มันใช้ **name resolver** (เพื่อค้นหาชุดของ backend address เช่นผ่าน DNS หรือ xDS) และ **load-balancing policy** (เช่น `round_robin`) เพื่อเลือก **subchannel** — หนึ่ง connection ต่อ backend — สำหรับแต่ละ call
+
+client-side LB เป็นแนวทาง idiomatic ใน gRPC เพราะมันเลี่ยง network hop ที่เพิ่มขึ้น setup คลาสสิก: resolve `dns:///my-service:50051` เป็นหลาย IP แล้ว apply `round_robin`
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, _ := grpc.NewClient(
+        "dns:///my-service:50051",
+        grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+    )
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel(
+        "dns:///my-service:50051",
+        options=[("grpc.lb_policy_name", "round_robin")],
+    )
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const client = new MyServiceClient(
+      'dns:///my-service:50051',
+      credentials.createInsecure(),
+      { 'grpc.service_config': JSON.stringify({
+          loadBalancingConfig: [{ round_robin: {} }],
+        }) },
+    );
+    ```
+  </TabItem>
+</Tabs>
+
+## Health checking
+
+การ balance ข้าม backend จะมีประโยชน์ก็ต่อเมื่อคุณ route หนีจากตัวที่ *ไม่ healthy* gRPC นิยาม **Health Checking Protocol** มาตรฐาน — service เล็ก ๆ ที่ทุก server เปิดเผยได้:
+
+```proto
+syntax = "proto3";
+package grpc.health.v1;
+
+message HealthCheckRequest { string service = 1; }
+message HealthCheckResponse {
+  enum ServingStatus { UNKNOWN = 0; SERVING = 1; NOT_SERVING = 2; }
+  ServingStatus status = 1;
+}
+
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
+}
+```
+
+load balancer และ orchestrator (Kubernetes, Envoy) เรียก `Check` — หรือ subscribe ด้วย `Watch` — แล้วหยุด route ไปยัง backend ที่รายงาน `NOT_SERVING` เพราะมันเป็น proto มาตรฐาน เครื่องมืออย่าง `grpc_health_probe` จึงใช้ได้กับ server ของทุกภาษา
+
+## Keepalive
+
+connection ที่อยู่ยาวอาจตายเงียบ ๆ ได้ (NAT ที่ idle ตัดทิ้ง, backend หายไป) **keepalive** ping — HTTP/2 PING เล็ก ๆ ตามช่วงเวลา — ตรวจจับ connection ที่ตายได้เร็ว เพื่อให้ client reconnect และ re-resolve ใหม่ แทนที่จะส่ง call เข้าไปในหลุมดำ ปรับมันอย่างระวัง: ก้าวร้าวเกินไป server อาจ reject คุณเพราะ ping ถี่เกิน
+
+<Callout title="สรุปหนึ่งบรรทัด">
+gRPC ถือ connection แบบ multiplex เดียว ดังนั้น **L4 balancer แบบไร้เดียงสาจะ pin ทุก call ไว้ที่ backend เดียว** แก้ด้วย **L7 proxy ที่รู้จัก gRPC** หรือ **client-side load balancing** (resolver + policy เช่น `round_robin` + หนึ่ง subchannel ต่อ backend) ป้อนข้อมูลให้มันด้วย **Health Checking Protocol** มาตรฐาน เพื่อให้ traffic เลี่ยง server ที่ไม่ healthy และใช้ **keepalive** เพื่อรู้ทันว่า connection ตายแล้ว
+</Callout>
+
+export const quizLb = [
+  {
+    q: 'ทำไม L4 (TCP) load balancer ธรรมดาถึงกระจาย traffic ของ gRPC ได้แย่?',
+    options: [
+      'gRPC ไม่ใช้ TCP',
+      'มัน balance ที่ connection และ gRPC ใช้ connection เดียวที่อยู่ยาว — ทุก call จึง pin ไปที่ backend เดียว',
+      'มันอ่าน protobuf ไม่ได้',
+      'gRPC ห้ามใช้ load balancer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'client-side load balancing ประกอบด้วยสองส่วนอะไร?',
+    options: [
+      'database กับ cache',
+      'name resolver (หา backend) และ load-balancing policy (เลือกตัวหนึ่งต่อ call)',
+      'TLS กับ token',
+      'header กับ trailer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'gRPC Health Checking Protocol มีไว้ทำอะไร?',
+    options: [
+      'เข้ารหัส channel',
+      'service มาตรฐานที่รายงาน SERVING / NOT_SERVING เพื่อให้ balancer route หนีจาก backend ที่ไม่ healthy',
+      'generate stub',
+      'บีบอัด metadata',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'keepalive ping แก้ปัญหาอะไร?',
+    options: [
+      'ทำให้ protobuf เล็กลง',
+      'ตรวจจับ connection ที่อยู่ยาวและตายเงียบ ๆ เพื่อให้ client reconnect',
+      'authenticate ผู้ใช้',
+      'balance load ข้าม backend',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/load-balancing-and-health" questions={quizLb} />
+
+<ProgressTracker client:visible id="production/load-balancing-and-health" />

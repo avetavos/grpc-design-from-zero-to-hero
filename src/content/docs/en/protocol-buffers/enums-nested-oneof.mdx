@@ -1,0 +1,131 @@
+---
+title: 'Enums, Nested & oneof'
+description: 'Enumerations and the mandatory zero value, nesting messages for structure, and oneof for mutually-exclusive fields.'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Enums: a named set of values
+
+An **enum** is a field that can only be one of a fixed set of named integers. It documents intent and prevents invalid states far better than a bare `int32` or `string`.
+
+```proto
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE      = 1;
+  STATUS_SUSPENDED   = 2;
+  STATUS_CLOSED      = 3;
+}
+
+message Account {
+  int64  id     = 1;
+  Status status = 2;
+}
+```
+
+## The zero-value rule
+
+There is one rule you cannot skip: **the first enum value must be `0`, and it should mean "unspecified."** Because proto3 has no null for scalars, an unset enum field reads as its zero value. If `0` meant `ACTIVE`, every account that forgot to set a status would silently look active.
+
+<Mermaid title="Why the zero value must mean 'unspecified'" code={enumDiagram} />
+
+export const enumDiagram = `flowchart TB
+  unset["field not set"] --> zero["reads as value 0"]
+  zero --> good["0 = UNSPECIFIED\n→ safe, obviously missing"]
+  zero --> bad["0 = ACTIVE\n→ dangerous, looks intentional"]`;
+
+The convention (used across Google's APIs) is to name it `<ENUM>_UNSPECIFIED = 0`. It gives you a clear "no value" state and reserves the meaningful values for explicit choices. Adding new enum values later is a safe, backward-compatible change — old clients simply treat unknown values as unknown.
+
+## Nested messages
+
+Messages can contain other messages. Nesting groups related data and lets you reuse a type, or scope a type to the message that owns it:
+
+```proto
+message Order {
+  int64 id = 1;
+
+  message LineItem {          // scoped to Order (Order.LineItem)
+    string sku      = 1;
+    int32  quantity = 2;
+  }
+
+  repeated LineItem items = 2;
+  Address shipping        = 3;  // a top-level message reused here
+}
+```
+
+Nest a type when it only makes sense inside its parent (`Order.LineItem`); keep it top-level when several messages share it (`Address`).
+
+## oneof: exactly one of several fields
+
+A **oneof** says "at most one of these fields is set at a time." Setting one clears the others, and the generated code gives you a clean way to check which is present.
+
+```proto
+message Notification {
+  int64 user_id = 1;
+
+  oneof channel {
+    string email        = 2;
+    string sms_number   = 3;
+    string push_token   = 4;
+  }
+}
+```
+
+Here a notification goes out over exactly one channel. `oneof` models that "tagged union" precisely — far better than three nullable fields and a comment hoping only one is filled in. It's also memory-efficient: the fields share storage.
+
+<Callout title="The one-line takeaway">
+Use **enums** for fixed value sets — but always make value `0` mean `UNSPECIFIED`, or unset fields will masquerade as a real choice. **Nest** messages that belong to one parent and keep shared ones top-level. Use **oneof** when exactly one of several fields should be set, so the schema enforces the "pick one" rule instead of a hopeful comment.
+</Callout>
+
+export const quizEnum = [
+  {
+    q: 'Why must the first enum value be 0 and mean "unspecified"?',
+    options: [
+      'Protobuf sorts enums numerically',
+      'An unset enum reads as 0, so 0 must be a safe "no value" — not a real choice',
+      'Zero is faster to encode',
+      'It is only a style preference with no effect',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When should a message be nested inside another rather than top-level?',
+    options: [
+      'Always — nesting is required',
+      'When the type only makes sense inside its parent and is not shared',
+      'Only when it has more than five fields',
+      'Never — proto3 forbids nesting',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does a `oneof` guarantee?',
+    options: [
+      'All listed fields are always set together',
+      'At most one of the listed fields is set at a time',
+      'The fields are encrypted',
+      'The fields must all be strings',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Adding a new value to an existing enum is:',
+    options: [
+      'A breaking change that old clients cannot handle',
+      'A backward-compatible change — old clients treat it as unknown',
+      'Impossible after the first release',
+      'Only allowed if you renumber every value',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/enums-nested-oneof" questions={quizEnum} />
+
+<ProgressTracker client:visible id="protocol-buffers/enums-nested-oneof" />

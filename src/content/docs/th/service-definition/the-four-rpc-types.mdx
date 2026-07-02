@@ -1,0 +1,121 @@
+---
+title: 'The Four RPC Types'
+description: 'unary, server-streaming, client-streaming และ bidirectional — call ทั้ง 4 แบบที่ gRPC มีให้ และ message flow ของแต่ละแบบ'
+sidebar:
+  order: 3
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## keyword เดียวเปลี่ยนทุกอย่าง
+
+gRPC มี call อยู่ **4** แบบพอดี และทั้งหมดเป็นไอเดียเดียวกัน — ฝั่ง request กับฝั่ง response — โดยเติม keyword `stream` เข้าไปที่ฝั่งใดฝั่งหนึ่ง, อีกฝั่ง, ทั้งสองฝั่ง หรือไม่เติมเลย
+
+```proto
+service Chat {
+  // 1. Unary: one request  → one response
+  rpc GetMessage(GetMessageRequest) returns (Message);
+
+  // 2. Server streaming: one request → many responses
+  rpc Subscribe(SubscribeRequest) returns (stream Message);
+
+  // 3. Client streaming: many requests → one response
+  rpc Upload(stream Chunk) returns (UploadSummary);
+
+  // 4. Bidirectional: many requests ↔ many responses
+  rpc Converse(stream Message) returns (stream Message);
+}
+```
+
+`stream` อยู่ตรงไหนคือการตัดสินใจออกแบบทั้งหมด อ่าน signature แล้วรู้ทันทีว่า call นั้นรูปร่างแบบไหน
+
+## Message flow ของแต่ละแบบ
+
+<Mermaid title="RPC ทั้ง 4 แบบ แยกตามทิศทางที่ message ไหล" code={flowDiagram} />
+
+export const flowDiagram = `flowchart TB
+  subgraph unary["1. Unary"]
+    direction LR
+    cu["client"] -->|"1 request"| su["server"]
+    su -->|"1 response"| cu
+  end
+  subgraph ss["2. Server streaming"]
+    direction LR
+    cs["client"] -->|"1 request"| sss["server"]
+    sss -->|"many responses"| cs
+  end
+  subgraph cst["3. Client streaming"]
+    direction LR
+    ccs["client"] -->|"many requests"| scs["server"]
+    scs -->|"1 response"| ccs
+  end
+  subgraph bidi["4. Bidirectional"]
+    direction LR
+    cb["client"] <-->|"many, both ways"| sb["server"]
+  end`;
+
+### 1. Unary — เข้าหนึ่ง ออกหนึ่ง
+
+request/response ที่คุ้นเคย `GetUser(id)` return `User` นี่คือค่าเริ่มต้นและครอบคลุม call ส่วนใหญ่: อ่าน, เขียน, สั่งงาน ถ้าไม่แน่ใจว่าต้องใช้แบบไหน เกือบทุกครั้งคำตอบคือ unary
+
+### 2. Server streaming — request หนึ่ง, response หลายตัว
+
+client ถามครั้งเดียว; server ส่ง **ลำดับ** ของ message กลับมาผ่าน stream ที่เปิดอยู่ แล้วส่งสัญญาณว่าจบ เหมาะเมื่อ request หนึ่งอันสร้างผลลัพธ์หลายตัวตามเวลา: subscribe event สด, tail log, หรือส่งผลลัพธ์ก้อนใหญ่แบบทีละ chunk เพื่อให้ client เริ่มประมวลผลได้ก่อนที่จะคำนวณเสร็จทั้งหมด
+
+### 3. Client streaming — request หลายตัว, response หนึ่ง
+
+client ส่ง **ลำดับ** ของ message; server อ่านทั้งหมดแล้วตอบ **ครั้งเดียว** ตอนจบ use case คลาสสิกคือ upload: stream ไฟล์ใหญ่แบบทีละ chunk หรือส่ง record เป็น batch แล้วได้ summary กลับมาก้อนเดียว (จำนวน byte ที่รับ, จำนวนแถวที่ insert)
+
+### 4. Bidirectional — หลายตัวทั้งสองทาง อิสระต่อกัน
+
+ทั้งสองฝั่ง stream ผ่าน connection เดียวกัน และ — จุดที่ลึกคือ — สองทิศทางนี้ **อิสระต่อกัน** server ไม่ต้องรอให้ client ส่งเสร็จ; message สลับกันไปมาได้อย่างอิสระ นี่คือรูปแบบสำหรับงาน real-time แบบสนทนา: chat, collaboration สด, control channel สองทาง มันทรงพลังที่สุดและซับซ้อนที่สุด จึงมีบทเรียนของตัวเองในภายหลัง
+
+## เลือกยังไง
+
+| คุณต้องการ... | ใช้ |
+|-------------|-----|
+| request/response ปกติ | **Unary** |
+| push update หลายตัวจาก request เดียว | **Server streaming** |
+| ส่ง upload ก้อนใหญ่หรือ batch แล้วได้ผลลัพธ์เดียว | **Client streaming** |
+| การสนทนาสองทางแบบสด | **Bidirectional** |
+
+สัญชาตญาณที่ดี: **เริ่มที่ unary** หยิบ streaming มาใช้เฉพาะเมื่อข้อมูลมา (หรือออก) ตามเวลาจริง ๆ และการ buffer มันไว้ใน message เดียวจะสิ้นเปลืองหรือช้าเกินไป streaming เพิ่มความซับซ้อนจริง — เรื่อง ordering, flow control, partial failure — ซึ่งโมดูล Streaming จะครอบคลุมเต็ม ๆ
+
+<Callout title="สรุปหนึ่งบรรทัด">
+call ทั้ง 4 แบบของ gRPC คือไอเดียเดียวที่เติม keyword `stream` ต่างฝั่งกัน: unary (หนึ่ง/หนึ่ง), server streaming (หนึ่ง/หลาย), client streaming (หลาย/หนึ่ง), และ bidirectional (หลาย/หลาย, อิสระต่อกัน) เริ่มที่ unary เป็นค่าเริ่มต้น; stream เฉพาะเมื่อ message ไหลตามเวลาจริง ๆ
+</Callout>
+
+export const quizTypes = [
+  {
+    q: 'keyword ตัวเดียวอะไรที่กำหนดรูปร่าง streaming ของ method?',
+    options: ['async', 'stream', 'repeated', 'flow'],
+    answer: 1,
+  },
+  {
+    q: 'RPC แบบไหนส่ง request หนึ่งอันและรับ response หลายตัว?',
+    options: ['Unary', 'Server streaming', 'Client streaming', 'Bidirectional'],
+    answer: 1,
+  },
+  {
+    q: 'client upload ไฟล์ใหญ่แบบทีละ chunk และอยากได้ summary กลับมาก้อนเดียว ควรใช้แบบไหน?',
+    options: ['Unary', 'Server streaming', 'Client streaming', 'Bidirectional'],
+    answer: 2,
+  },
+  {
+    q: 'อะไรทำให้ bidirectional streaming ต่างจากการทำ stream อีกสองแบบพร้อมกัน?',
+    options: [
+      'มันใช้สอง connection',
+      'สองทิศทางอิสระต่อกัน — message สลับกันไปมาได้อย่างอิสระ',
+      'มันเร็วกว่าเสมอ',
+      'มัน return error ไม่ได้',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/the-four-rpc-types" questions={quizTypes} />
+
+<ProgressTracker client:visible id="service-definition/the-four-rpc-types" />

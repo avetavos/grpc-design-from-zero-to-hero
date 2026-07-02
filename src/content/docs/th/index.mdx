@@ -1,0 +1,60 @@
+---
+title: gRPC Design — From Zero to Hero
+description: ออกแบบ API แบบ contract-first ที่เร็วด้วย gRPC และ Protocol Buffers ตั้งแต่พื้นฐาน — RPC model, protobuf schema, RPC ทั้ง 4 แบบ, streaming, deadline, interceptor, security, gRPC-Web และ REST transcoding พร้อมตัวอย่าง .proto และ Go/Python/Node
+template: splash
+hero:
+  tagline: คอร์สแบบ standalone ตั้งแต่ผู้เริ่มต้นจนถึงขั้นสูง ว่าด้วยการออกแบบ API ด้วย gRPC และ Protocol Buffers ตั้งแต่ RPC model และ protobuf schema ไปจนถึง streaming, deadline, interceptor, load balancing, security และ gRPC-Web — ทุกหัวข้อมี .proto contract คู่กับตัวอย่าง Go, Python และ Node
+  actions:
+    - text: เริ่มที่นี่
+      link: /grpc/th/grpc-foundations/
+      icon: right-arrow
+      variant: primary
+    - text: ข้ามไปที่ Protocol Buffers
+      link: /grpc/th/protocol-buffers/
+      icon: open-book
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## สิ่งที่คุณจะได้เรียน
+
+<CardGrid>
+  <Card title="gRPC Foundations" icon="rocket">
+    gRPC คืออะไร, RPC model, ทำไมต้องทำงานบน HTTP/2 และเทียบกับ REST อย่างไร [เริ่ม →](/grpc/th/grpc-foundations/)
+  </Card>
+  <Card title="Protocol Buffers" icon="seti:json">
+    message และ field number, scalar type, enum, oneof, map, well-known type และการ evolve schema อย่างปลอดภัย [ออกแบบ schema →](/grpc/th/protocol-buffers/)
+  </Card>
+  <Card title="Service Definition" icon="seti:plan">
+    การนิยาม service, RPC ทั้ง 4 แบบ, การออกแบบ method signature และ error/status model [ออกแบบ →](/grpc/th/service-definition/)
+  </Card>
+  <Card title="Building Services" icon="seti:config">
+    code generation ด้วย protoc, การ implement server, การเขียน client, deadline และ cancellation [สร้าง →](/grpc/th/building-services/)
+  </Card>
+  <Card title="Streaming" icon="random">
+    server, client และ bidirectional streaming — พร้อม flow control ที่ทำให้มันทำงานได้ดี [สตรีม →](/grpc/th/streaming/)
+  </Card>
+  <Card title="Production Concerns" icon="approve-check">
+    interceptor, TLS และ auth, metadata, load balancing และ health checking [ขึ้น production →](/grpc/th/production/)
+  </Card>
+  <Card title="Ecosystem & Advanced" icon="puzzle">
+    gRPC-Web บน browser, REST/JSON transcoding, versioning ในระดับ scale, observability และ testing [ต่อยอด →](/grpc/th/ecosystem-advanced/)
+  </Card>
+</CardGrid>
+
+## คอร์สนี้ทำงานยังไง
+
+<CardGrid>
+  <Card title="Contract-first เสมอ" icon="seti:json">
+    ทุกบทเรียนเริ่มจาก `.proto` — contract ที่เป็นกลางไม่ผูกกับภาษา — แล้วค่อยแสดง server และ client ที่ generate ออกมา เพื่อให้เห็นว่า schema ขับเคลื่อน code อย่างไร
+  </Card>
+  <Card title="สามภาษาเทียบกันชัด ๆ" icon="seti:config">
+    ตัวอย่าง server และ client ใน Go, Python และ Node (TypeScript) ผ่านแท็บที่ sync กัน เลือกภาษาครั้งเดียวแล้วตามไปทุกที่
+  </Card>
+  <Card title="เน้นการออกแบบ ไม่ใช่แค่ syntax" icon="approve-check">
+    ทุกหัวข้อครอบคลุมเหตุผลและ trade-off — เมื่อไรควร stream, ตั้ง deadline อย่างไร, evolve schema อย่างไรโดยไม่ทำให้ client พัง
+  </Card>
+  <Card title="ไดอะแกรมที่อธิบายได้" icon="puzzle">
+    RPC lifecycle, HTTP/2 multiplexing, call ทั้ง 4 แบบ และ interceptor chain เป็นไดอะแกรม Mermaid ที่รองรับธีม สองภาษา (English / ไทย) พร้อมบันทึกความคืบหน้า quiz
+  </Card>
+</CardGrid>

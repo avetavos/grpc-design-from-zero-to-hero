@@ -1,0 +1,158 @@
+---
+title: 'Deadlines & Cancellation'
+description: 'Why every call needs a deadline, how deadlines propagate across a call chain, and how cancellation stops wasted work.'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## A deadline, not a timeout
+
+A **deadline** is an absolute point in time — "give up if this isn't done by 10:00:03.500". A **timeout** is a duration — "give up after 300ms" — which most libraries convert into a deadline internally.
+
+The distinction matters because gRPC **propagates the deadline**, not the timeout. When service A calls B, which calls C, the *same* absolute deadline travels down the chain. Each hop knows how much wall-clock time is actually left, so nobody keeps working on a request the caller has already given up on.
+
+<Mermaid title="One absolute deadline travels down the whole call chain" code={deadlineDiagram} />
+
+export const deadlineDiagram = `flowchart LR
+  a["Service A\ndeadline = now + 300ms"] -->|deadline propagated| b["Service B\nsees ~280ms left"]
+  b -->|deadline propagated| c["Service C\nsees ~250ms left"]
+  c -. "if deadline passes,\nall hops abort" .-> x["DEADLINE_EXCEEDED"]`;
+
+## Always set one
+
+The most important operational rule in gRPC: **every call gets a deadline.** A call without one waits forever by default. One slow or stuck dependency then ties up a request, which ties up a goroutine/thread/connection, and under load that cascades into a total stall — the classic way a single slow service takes down everything upstream.
+
+Here is how you set a deadline on a call:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+    defer cancel() // always release the context
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if status.Code(err) == codes.DeadlineExceeded {
+        log.Println("call ran out of time")
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    try:
+        # timeout is converted to an absolute deadline internally
+        user = client.GetUser(user_pb2.GetUserRequest(id=42), timeout=0.3)
+    except grpc.RpcError as e:
+        if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            print("call ran out of time")
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const deadline = new Date(Date.now() + 300); // absolute time
+    client.getUser({ id: 42 }, { deadline }, (err, user) => {
+      if (err?.code === status.DEADLINE_EXCEEDED) {
+        console.log('call ran out of time');
+      }
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## Cancellation stops wasted work
+
+Deadlines are one way a call ends early; explicit **cancellation** is the other. If the client goes away — the user closed the tab, the parent request was itself cancelled — gRPC signals the server that the call is cancelled. A well-written server *checks* for cancellation and stops: it aborts the database query, breaks the loop, and frees resources instead of computing a result nobody will read.
+
+On the server side you watch the request context:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        select {
+        case <-ctx.Done(): // client cancelled or deadline exceeded
+            return nil, status.FromContextError(ctx.Err()).Err()
+        default:
+        }
+        // ... do the work, ideally passing ctx to the DB call too
+        return lookup(ctx, req.Id)
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def GetUser(self, request, context):
+        if not context.is_active():  # client cancelled / deadline passed
+            return user_pb2.User()
+        # pass context to downstream calls so cancellation propagates
+        return lookup(request.id, context)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    getUser(call, callback) {
+      if (call.cancelled) return; // client already gave up
+      call.on('cancelled', () => stopWork());
+      doLookup(call.request.id, callback);
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+The golden rule: **propagate the context.** Pass the incoming request's context into every downstream gRPC call and database query. Then one deadline or one cancellation cleanly unwinds the entire tree of work.
+
+<Callout title="The one-line takeaway">
+Set a **deadline on every call** — a call without one waits forever and one stuck dependency can stall your whole service. gRPC propagates the *absolute* deadline down the call chain, and cancellation lets a server stop wasted work when the caller has left. Always thread the context through downstream calls so it all unwinds together.
+</Callout>
+
+export const quizDeadline = [
+  {
+    q: 'What does gRPC propagate down a call chain?',
+    options: [
+      'The timeout duration, reset at each hop',
+      'The same absolute deadline, so each hop knows the real time left',
+      'Nothing — each service sets its own',
+      'The client IP address',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What happens to a gRPC call with no deadline set?',
+    options: [
+      'It fails immediately',
+      'It uses a default of 1 second',
+      'It can wait forever, risking a cascading stall',
+      'It retries three times',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'What status code signals a call ran out of time?',
+    options: [
+      'NOT_FOUND',
+      'DEADLINE_EXCEEDED',
+      'INVALID_ARGUMENT',
+      'UNAUTHENTICATED',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How does a server avoid computing results nobody will read?',
+    options: [
+      'By ignoring the client entirely',
+      'By checking the request context for cancellation and stopping work',
+      'By caching every response forever',
+      'By opening a second connection',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/deadlines-and-cancellation" questions={quizDeadline} />
+
+<ProgressTracker client:visible id="building-services/deadlines-and-cancellation" />

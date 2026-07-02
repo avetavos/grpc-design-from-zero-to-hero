@@ -1,0 +1,60 @@
+---
+title: gRPC Design — From Zero to Hero
+description: Design fast, contract-first APIs with gRPC and Protocol Buffers from first principles — the RPC model, protobuf schemas, the four RPC types, streaming, deadlines, interceptors, security, gRPC-Web, and REST transcoding — with runnable .proto and Go/Python/Node examples.
+template: splash
+hero:
+  tagline: A standalone, beginner→advanced course on designing APIs with gRPC and Protocol Buffers. From the RPC model and protobuf schemas to streaming, deadlines, interceptors, load balancing, security, and gRPC-Web — every topic with the .proto contract and Go, Python, and Node examples side by side.
+  actions:
+    - text: Start here
+      link: /grpc/en/grpc-foundations/
+      icon: right-arrow
+      variant: primary
+    - text: Jump to Protocol Buffers
+      link: /grpc/en/protocol-buffers/
+      icon: open-book
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What you'll learn
+
+<CardGrid>
+  <Card title="gRPC Foundations" icon="rocket">
+    What gRPC is, the RPC model, why it rides on HTTP/2, and how it compares to REST. [Start →](/grpc/en/grpc-foundations/)
+  </Card>
+  <Card title="Protocol Buffers" icon="seti:json">
+    Messages & field numbers, scalar types, enums, oneof, maps, well-known types, and evolving schemas safely. [Model →](/grpc/en/protocol-buffers/)
+  </Card>
+  <Card title="Service Definition" icon="seti:plan">
+    Defining services, the four RPC types, designing method signatures, and the error/status model. [Design →](/grpc/en/service-definition/)
+  </Card>
+  <Card title="Building Services" icon="seti:config">
+    Code generation with protoc, implementing a server, writing a client, deadlines & cancellation. [Build →](/grpc/en/building-services/)
+  </Card>
+  <Card title="Streaming" icon="random">
+    Server, client, and bidirectional streaming — and the flow control that keeps them healthy. [Stream →](/grpc/en/streaming/)
+  </Card>
+  <Card title="Production Concerns" icon="approve-check">
+    Interceptors, TLS & auth, metadata, load balancing, and health checking. [Ship →](/grpc/en/production/)
+  </Card>
+  <Card title="Ecosystem & Advanced" icon="puzzle">
+    gRPC-Web in the browser, REST/JSON transcoding, versioning at scale, observability & testing. [Extend →](/grpc/en/ecosystem-advanced/)
+  </Card>
+</CardGrid>
+
+## How this course works
+
+<CardGrid>
+  <Card title="Contract-first, always" icon="seti:json">
+    Every lesson starts from the `.proto` — the language-neutral contract — then shows the generated server and client so you see how the schema drives the code.
+  </Card>
+  <Card title="Three languages side by side" icon="seti:config">
+    Server and client examples in Go, Python, and Node (TypeScript) through synced tabs — pick your language once and follow it everywhere.
+  </Card>
+  <Card title="Design, not just syntax" icon="approve-check">
+    Every topic covers the why and the trade-offs — when to stream, how to set deadlines, how to evolve a schema without breaking clients.
+  </Card>
+  <Card title="Diagrams that explain" icon="puzzle">
+    The RPC lifecycle, HTTP/2 multiplexing, the four call types, and interceptor chains as theme-aware Mermaid diagrams. Bilingual (English / ไทย) with saved quiz progress.
+  </Card>
+</CardGrid>

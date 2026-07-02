@@ -1,0 +1,98 @@
+---
+title: 'Building Services'
+description: 'จาก .proto ไปสู่ code ที่รันได้จริง — generate stub, implement server, เขียน client และคุมทุก call ด้วย deadline กับ cancellation'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## จาก contract ไปสู่ code ที่รันได้
+
+คุณมี `.proto` contract แล้ว โมดูลนี้จะเปลี่ยนมันให้เป็นของที่รันได้จริง: server ที่ตอบ call, client ที่ยิง call และวินัยเรื่อง deadline ที่กันไม่ให้ทั้งระบบค้างไปตลอดกาล
+
+ทุกบทเรียนใช้ contract เล็ก ๆ ตัวเดียวกัน เพื่อให้คุณตามตัวอย่างเดียวได้ตั้งแต่ต้นจนจบ:
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message GetUserRequest {
+  int64 id = 1;
+}
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+}
+```
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียนรู้ |
+|--------|-------------------|
+| Code Generation | `protoc`, plugin ของแต่ละภาษา, `buf` และสิ่งที่ generate ออกมาจริง ๆ |
+| Implementing a Server | เติม handler, register service และ serve |
+| Writing a Client | channel, stub, การยิง call และการ reuse connection |
+| Deadlines & Cancellation | ทำไมทุก call ต้องมี deadline และมันส่งต่อกันอย่างไร |
+
+## หน้าตาของงาน
+
+<Mermaid title="วงจรการ build: generate, implement, call" code={buildDiagram} />
+
+export const buildDiagram = `flowchart LR
+  proto[".proto"] -->|protoc / buf| gen["generated code:\nmessages + stub + server interface"]
+  gen --> srv["implement server\n(fill GetUser)"]
+  gen --> cli["write client\n(call GetUser)"]
+  cli -->|HTTP/2| srv`;
+
+สังเกตว่า generated code อยู่ตรงกลาง: มันยื่น interface ให้ **server** ไป implement และยื่น stub ให้ **client** ไปเรียก คุณเขียนสองฝั่ง ส่วน codegen รับประกันว่าทั้งสองฝั่งตรงกัน
+
+<Callout title="The one-line takeaway">
+การสร้าง gRPC service มี 3 จังหวะ: generate typed code จาก `.proto`, implement server handler และเรียกมันจาก client stub — แล้วห่อทุก call ด้วย deadline เพื่อไม่ให้อะไรค้างไปตลอดกาล
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'code ที่ generate จาก .proto ให้อะไรกับคุณบ้าง?',
+    options: [
+      'มีแค่ client',
+      'message type พร้อมกับ client stub และ server interface',
+      'database schema',
+      'HTML form',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมทุกบทเรียนในโมดูลนี้ถึง reuse contract UserService ตัวเดียวกัน?',
+    options: [
+      'เพราะ gRPC รองรับ service เดียวต่อโปรแกรม',
+      'เพื่อให้ตามตัวอย่างเดียวได้ตั้งแต่ schema ไปถึง server และ client',
+      'เพราะ protoc บังคับให้ทำ',
+      'เพื่อประหยัด bandwidth',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'วินัยข้อไหนที่กันไม่ให้ gRPC call ค้างไปตลอดกาล?',
+    options: [
+      'ตั้ง deadline ในทุก call',
+      'ใช้ JSON แทน protobuf',
+      'เปิด channel ใหม่ต่อ call',
+      'ปิด TLS',
+    ],
+    answer: 0,
+  },
+];
+
+<Quiz client:visible id="building-services/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="building-services/index" />

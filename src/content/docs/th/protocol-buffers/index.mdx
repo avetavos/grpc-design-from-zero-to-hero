@@ -1,0 +1,81 @@
+---
+title: 'Protocol Buffers'
+description: 'schema language ที่อยู่เบื้องหลัง gRPC — message และ field number, scalar type, enum, oneof, map, well-known type และการ evolve schema โดยไม่ทำให้ client พัง'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## ภาษาที่ใช้เขียน API ของคุณ
+
+ทุกอย่างใน gRPC เริ่มจากไฟล์ `.proto` และไฟล์นั้นเขียนด้วย **Protocol Buffers** ก่อนที่จะออกแบบ service และ RPC method ได้ คุณต้องคล่องกับหน่วยพื้นฐานที่มันใช้ก่อน นั่นคือ **message**
+
+โมดูลนี้ว่าด้วย protobuf ในฐานะ *schema language* — วิธี model ข้อมูลให้แม่นยำ และวิธีออกแบบให้มันเติบโตได้เป็นปี ๆ โดยไม่ทำให้ client ที่ปล่อยไปแล้วพัง
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียนรู้ |
+|--------|-------------------|
+| Messages & Fields | syntax ของ message และทำไมทุก field ต้องมี **number** ไม่ใช่แค่ชื่อ |
+| Scalar Types & Defaults | type พื้นฐาน, default value ของ proto3 และกับดักเรื่อง presence ของ `optional` |
+| Enums, Nested & oneof | enum (พร้อมกฎ zero value), การ nest และ field ที่เลือกได้อย่างเดียว |
+| Repeated, Maps & Well-Known | list, map แบบ key/value และ standard library ของ `google.protobuf` |
+| Evolving Schemas | กฎที่ทำให้ schema เปลี่ยนได้อย่างปลอดภัย — และกฎที่ทำให้ client พัง |
+
+## ทำไม schema ถึงควรมีโมดูลของตัวเอง
+
+message ของ protobuf ดูเรียบง่ายจนหลอกตา — แค่ field ที่มี type และ number ไม่กี่ตัว แต่ number, default และกฎการ evolve เหล่านั้นแหละคือจุดที่ระบบจริงมักเจอปัญหา
+
+<Mermaid title="การตัดสินใจเรื่อง schema ที่โมดูลนี้ทำให้ปลอดภัย" code={overviewDiagram} />
+
+export const overviewDiagram = `flowchart TB
+  msg["ออกแบบ message\n(field + number)"] --> types["เลือก type & default"]
+  types --> evolve["evolve schema\n(add / reserve / ห้าม reuse)"]
+  evolve --> safe["client ทำงานต่อได้\nข้าม version"]`;
+
+ถ้าวาง field number และกฎการ evolve ให้ถูกตั้งแต่แรก API ของคุณจะเพิ่ม feature ได้เป็นปี ๆ โดยไม่มี breaking change แต่ถ้าวางผิด คุณจะติดกับปัญหา versioning ตั้งแต่ครั้งแรกที่ message ต้องโตขึ้น
+
+<Callout title="mindset สำหรับโมดูลนี้">
+message ใน `.proto` คือ **contract ที่อยู่ยาว** ไม่ใช่ struct ที่ใช้แล้วทิ้ง ชื่อของ field มีไว้ให้คนอ่าน ส่วน **number** คือสิ่งที่เดินทางจริงและเป็นสิ่งที่คุณเปลี่ยนแบบชุ่ย ๆ ไม่ได้ ออกแบบเสมือนว่าทุก message จะยังอยู่บน production ในอีกสามปีข้างหน้า — เพราะมันมักจะเป็นแบบนั้นจริง ๆ
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'หน่วยพื้นฐานที่โมดูลนี้โฟกัสคืออะไร?',
+    options: [
+      'service',
+      'message',
+      'channel',
+      'interceptor',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม schema evolution ถึงต้องใส่ใจเป็นพิเศษ?',
+    options: [
+      'เพราะไฟล์ protobuf ต้องเล็กกว่า 1KB',
+      'เพราะ field number และกฎการ evolve เป็นตัวตัดสินว่า client เก่ายังทำงานได้หรือไม่',
+      'เพราะ enum เปลี่ยนไม่ได้',
+      'เพราะ gRPC ส่ง schema ใหม่ทุกครั้งที่เรียก',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ควรมอง message ใน .proto อย่างไร?',
+    options: [
+      'เป็น struct ใช้แล้วทิ้งที่เขียนใหม่เมื่อไรก็ได้',
+      'เป็น contract ที่อยู่ยาวและต้องโตได้โดยไม่ทำให้ client พัง',
+      'เป็นแค่ documentation ที่ไม่มีผลตอน runtime',
+      'เป็น cache key',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="protocol-buffers/index" />

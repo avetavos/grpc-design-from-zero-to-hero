@@ -1,0 +1,140 @@
+---
+title: 'Security & Auth'
+description: 'Two separate layers — TLS/mTLS to secure and identify the channel, and token credentials to authenticate each call — and why you need both.'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Two questions, two layers
+
+Security in gRPC answers two different questions, and it's crucial not to conflate them:
+
+- **Is the connection private and is the *server* who it claims to be?** → **transport security** (TLS).
+- **Who is the *caller*, and are they allowed to make this call?** → **call authentication** (a token, usually in metadata).
+
+gRPC models these as two kinds of credentials: **channel credentials** (the transport layer) and **call credentials** (per-RPC auth). You almost always want both.
+
+<Mermaid title="Transport security and call auth are separate layers" code={layersDiagram} />
+
+export const layersDiagram = `flowchart TB
+  subgraph transport["Channel credentials — TLS"]
+    t["encrypts the connection\n+ verifies server identity\n(mTLS also verifies client)"]
+  end
+  subgraph call["Call credentials — per RPC"]
+    c["attaches a token in metadata\nidentifies the caller\nchecked by a server interceptor"]
+  end
+  transport --> call`;
+
+## TLS: encrypt and identify the channel
+
+By default a plaintext channel (`insecure`) is fine for a local demo and unacceptable in production. **TLS** encrypts the connection and lets the client verify the server's certificate, so nobody can eavesdrop or impersonate the server.
+
+**mTLS** (mutual TLS) goes one step further: the *server* also verifies the *client's* certificate. This is the common pattern for service-to-service auth inside a mesh — both ends prove their identity with certificates, and no bearer token is needed for the machine identity.
+
+## Call credentials: who is calling
+
+TLS proves the *server's* identity and the machine's, but often you also need the *user's* identity — a bearer token (JWT, OAuth) sent per call. gRPC attaches this as **call credentials**: the client puts an `authorization` token in metadata on every RPC, and a server interceptor validates it and rejects bad ones with `UNAUTHENTICATED`.
+
+Call credentials are **per-RPC**, so different calls on the same channel can carry different tokens (e.g. one channel, many end users).
+
+## Putting them together
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // Channel credentials: TLS. Call credentials: a token on every RPC.
+    creds := credentials.NewClientTLSFromCert(certPool, "")
+    perRPC := oauth.TokenSource{TokenSource: myTokenSource}
+
+    conn, _ := grpc.NewClient(
+        "api.example.com:443",
+        grpc.WithTransportCredentials(creds),      // TLS
+        grpc.WithPerRPCCredentials(perRPC),         // token per call
+    )
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Channel credentials: TLS. Call credentials: a token per RPC.
+    channel_creds = grpc.ssl_channel_credentials(root_certificates=root_certs)
+    call_creds = grpc.access_token_call_credentials(access_token)
+    composite = grpc.composite_channel_credentials(channel_creds, call_creds)
+
+    channel = grpc.secure_channel("api.example.com:443", composite)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // TLS channel credentials + a per-call metadata token.
+    const ssl = credentials.createSsl(rootCert);
+    const callCreds = credentials.createFromMetadataGenerator((_, cb) => {
+      const md = new Metadata();
+      md.set('authorization', `Bearer ${token}`);
+      cb(null, md);
+    });
+    const combined = credentials.combineChannelCredentials(ssl, callCreds);
+    const client = new ApiClient('api.example.com:443', combined);
+    ```
+  </TabItem>
+</Tabs>
+
+## The mistake to avoid
+
+**Never send a bearer token over an insecure channel.** gRPC enforces this: call credentials refuse to attach to a plaintext connection, precisely because a token sent in cleartext is a token anyone on the path can steal. Call credentials require channel credentials (TLS) underneath — the framework is protecting you from the most common gRPC security bug.
+
+<Callout title="The one-line takeaway">
+gRPC splits security into two layers: **channel credentials (TLS/mTLS)** secure and identify the connection, and **call credentials** authenticate each RPC with a token in metadata. Use both — and remember gRPC refuses to send call credentials over an insecure channel, so a token always rides on TLS.
+</Callout>
+
+export const quizSec = [
+  {
+    q: 'What question do channel credentials (TLS) answer?',
+    options: [
+      'Which database to query',
+      'Is the connection private and is the server who it claims to be',
+      'How many retries to allow',
+      'Which method to call',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does mTLS add over plain TLS?',
+    options: [
+      'Faster encryption',
+      'The server also verifies the client’s certificate — mutual identity',
+      'Automatic retries',
+      'JSON support',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why are call credentials described as per-RPC?',
+    options: [
+      'They can only be set once per process',
+      'Different calls on the same channel can carry different tokens',
+      'They replace TLS',
+      'They are sent only on the first call',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why does gRPC refuse to attach call credentials to an insecure channel?',
+    options: [
+      'To force everyone onto HTTP/1.1',
+      'A token sent in cleartext could be stolen by anyone on the path — so it requires TLS underneath',
+      'Because tokens are too large for plaintext',
+      'Because insecure channels are faster',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/security-and-auth" questions={quizSec} />
+
+<ProgressTracker client:visible id="production/security-and-auth" />

@@ -1,0 +1,131 @@
+---
+title: 'Designing Methods'
+description: 'wrapper request/response message, convention การตั้งชื่อ, pagination และ idempotency — นิสัยที่ทำให้ API แข็งแรงเมื่อมันโตขึ้น'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## API ที่คุณ ship ออกไปคือตลอดกาล
+
+method signature คือคำสัญญา พอ client พึ่งพามันแล้ว คุณเปลี่ยนได้แค่ในทางที่ backward-compatible เท่านั้น — หรือไม่ก็ bump ทั้ง package เป็น `v2` ดังนั้นนิสัยการออกแบบด้านล่างไม่ใช่แค่ขัดเงา แต่คือสิ่งที่ทำให้ API อยู่รอดผ่านการเปลี่ยนแปลงเป็นปี ๆ โดยไม่ต้อง migration ที่เจ็บปวด
+
+## wrap request และ response เสมอ
+
+กฎที่มีค่าที่สุด: **ทุก method มี request message และ response message ของตัวเอง** อย่ารับหรือ return scalar เปล่า ๆ และอย่า reuse domain message มาเป็น request
+
+```proto
+// ทำแบบนี้
+rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+message DeleteUserRequest  { int64 id = 1; }
+message DeleteUserResponse {}   // empty today, has room tomorrow
+```
+
+```proto
+// เลี่ยงแบบนี้
+rpc DeleteUser(int64) returns (google.protobuf.Empty);
+```
+
+ทำไมต้อง wrap ทั้งที่วันนี้มันยังว่างอยู่?
+
+- **มีที่ให้โต** การเพิ่ม flag `soft_delete` เข้าไปใน request หรือ timestamp `deleted_at` ใน response เป็นการเปลี่ยนแบบ additive ที่ปลอดภัย scalar เปล่า ๆ หรือ `Empty` ที่ใช้ร่วมกันไม่มีที่ให้เพิ่ม
+- **ชัดเจน** `DeleteUserRequest` บอกเจตนาได้ดีกว่า `int64`
+- **สม่ำเสมอ** ทุก method หน้าตาเหมือนกัน tooling และคนอ่านจึงไม่ต้อง handle เคสพิเศษเลย
+
+## Convention การตั้งชื่อ
+
+ทำตาม convention ที่ code generator คาดหวัง แล้ว client ที่ generate ออกมาจะอ่านเป็นธรรมชาติในทุกภาษา:
+
+- **method: `VerbNoun` แบบ PascalCase** — `GetUser`, `CreateOrder`, `ListInvoices`, `BatchUpdateItems` verb มาตรฐาน (`Get`, `List`, `Create`, `Update`, `Delete`) ตั้งความคาดหวังได้ชัดเจน
+- **message: `MethodNameRequest` / `MethodNameResponse`** — `ListUsersRequest`, `ListUsersResponse`
+- **field: `snake_case`** — `user_id`, `page_size`, `created_at` generator แปลงเป็น casing ของแต่ละภาษาให้
+
+## Pagination: อย่า return list ที่ไม่มีขอบเขต
+
+`ListUsers` ที่ return user *ทั้งหมด* สุดท้ายจะ return เป็นล้านแล้วล่ม ออกแบบ list method ให้ page ตั้งแต่แรกด้วย token pattern ที่ใช้กันแพร่หลาย:
+
+```proto
+message ListUsersRequest {
+  int32  page_size  = 1;  // how many to return
+  string page_token = 2;  // opaque cursor from the previous response
+}
+
+message ListUsersResponse {
+  repeated User users           = 1;
+  string        next_page_token = 2;  // empty when there are no more
+}
+```
+
+<Mermaid title="pagination แบบ token: แต่ละ response ยื่นกุญแจของหน้าถัดไปให้คุณ" code={pageDiagram} />
+
+export const pageDiagram = `flowchart LR
+  r1["ListUsers(page_size=50)"] --> p1["50 users +\nnext_page_token=abc"]
+  p1 --> r2["ListUsers(token=abc)"]
+  r2 --> p2["next 50 +\nnext_page_token=def"]
+  p2 --> r3["... until token is empty"]`;
+
+client ส่ง `next_page_token` ที่ได้กลับมาไปเรื่อย ๆ จนกว่ามันจะกลับมาเป็นค่าว่าง token นี้ **opaque** — server ตัดสินใจเองว่าจะ encode อะไร (offset, cursor, keyset) และ client ต้องไม่ parse มันเด็ดขาด อิสระนั้นทำให้คุณเปลี่ยน strategy การ pagination ทีหลังได้โดยไม่แตะ client แม้แต่ตัวเดียว
+
+## Idempotency: ทำให้ retry ปลอดภัย
+
+network ล่ม และ client retry ถ้า `CreatePayment` ที่ถูก retry ชาร์จลูกค้าสองรอบ นั่นคือบั๊กด้านการออกแบบ ไม่ใช่โชคร้าย ทำให้ mutating method **idempotent** เท่าที่ทำได้ — วิธีที่พบบ่อยคือใช้ request id ที่ client สร้างขึ้นแล้ว server dedup:
+
+```proto
+message CreatePaymentRequest {
+  Payment payment    = 1;
+  string  request_id = 2;  // client-generated; server ignores duplicates
+}
+```
+
+server บันทึกแต่ละ `request_id`; ถ้าซ้ำก็ return ผลเดิมแทนที่จะชาร์จอีกครั้ง `Get`/`List` เป็น idempotent อยู่แล้วโดยธรรมชาติ; `Delete` มักจะใช่; `Create` ต้องการตัวช่วยแบบนี้
+
+<Callout title="สรุปหนึ่งบรรทัด">
+ให้ทุก method มี request และ response message เฉพาะเพื่อให้ขยายได้; ตั้งชื่อตามที่ generator คาดหวัง; page ผลลัพธ์ list ด้วย `page_token` แบบ opaque; และทำ mutation ให้ idempotent ด้วย `request_id` ที่ client สร้างขึ้น นิสัย 4 อย่างนี้คือสิ่งที่ทำให้ gRPC API evolve ได้เป็นปี ๆ โดยไม่ทำให้ client พัง
+</Callout>
+
+export const quizDesign = [
+  {
+    q: 'ทำไมต้อง wrap ทุก method ด้วย request/response message ของตัวเอง แม้แต่ตัวที่ว่าง?',
+    options: [
+      'เพื่อทำให้ message ใหญ่ขึ้น',
+      'เพื่อให้เพิ่ม field ทีหลังได้แบบ backward-compatible ที่ปลอดภัย',
+      'เพราะ scalar ใช้ไม่ได้',
+      'เพื่อทำให้ client ช้าลงสำหรับ rate limiting',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'casing ที่แนะนำสำหรับชื่อ field ใน protobuf คืออะไร?',
+    options: ['camelCase', 'PascalCase', 'snake_case', 'SCREAMING_CASE'],
+    answer: 2,
+  },
+  {
+    q: 'ทำไม page_token ถึงต้อง opaque สำหรับ client?',
+    options: [
+      'เพื่อซ่อนมันจาก log',
+      'เพื่อให้ server เปลี่ยน strategy การ pagination ได้โดยไม่ทำให้ client พัง',
+      'เพราะ token ถูก encrypt โดย gRPC',
+      'เพื่อทำให้มันสั้นลง',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'โดยทั่วไปทำให้ Create method retry ได้อย่างปลอดภัยยังไง?',
+    options: [
+      'ปิด retry ไปเลย',
+      'ใส่ request_id ที่ client สร้างขึ้นแล้ว server dedup',
+      'return error ในการเรียกครั้งที่สอง',
+      'ใช้ deadline ที่ใหญ่ขึ้น',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/designing-methods" questions={quizDesign} />
+
+<ProgressTracker client:visible id="service-definition/designing-methods" />

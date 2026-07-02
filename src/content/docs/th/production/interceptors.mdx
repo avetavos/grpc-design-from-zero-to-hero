@@ -1,0 +1,155 @@
+---
+title: 'Interceptors'
+description: 'middleware model ของ gRPC — ห่อทุก call เพื่อทำ logging, auth, metrics และ retry ทั้ง unary และ streaming RPC'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Middleware สำหรับ RPC
+
+**interceptor** คือ middleware เวอร์ชันของ gRPC: function ที่ห่อ call ไว้ เพื่อให้คุณรัน code *ก่อน* และ *หลัง* handler จริง ถ้าคุณเคยใช้ HTTP middleware มาก่อน นี่คือแนวคิดเดียวกัน แต่ใช้กับ RPC แทน route
+
+จุดประสงค์คือเก็บ logic แบบ cross-cutting — logging, authentication, metrics, tracing, retry — ออกจาก business handler คุณเขียน concern นั้นครั้งเดียวเป็น interceptor แล้วมัน apply กับทุก method อัตโนมัติ
+
+## chain ห่อ handler ไว้
+
+interceptor ประกอบกันเป็น **chain** แต่ละตัวรับ call, ทำงานของมัน แล้วเรียกตัวถัดไป — จนถึงตัวในสุดคือ handler ของคุณ ตอนไหลกลับออกมา แต่ละ interceptor ตรวจ response หรือ error ได้
+
+<Mermaid title="interceptor chain ที่ห่อ handler ไว้" code={chainDiagram} />
+
+export const chainDiagram = `flowchart LR
+  call["incoming call"] --> log["logging\ninterceptor"]
+  log --> auth["auth\ninterceptor"]
+  auth --> metrics["metrics\ninterceptor"]
+  metrics --> handler["handler ของคุณ"]
+  handler -->|response / error| metrics
+  metrics --> auth
+  auth --> log
+  log -->|response| call`;
+
+ลำดับสำคัญ: วาง logging ไว้นอกสุดเพื่อให้มันบันทึกทุกอย่าง, auth ถัดมาเพื่อ reject call ที่ยังไม่ authenticate ก่อนจะถึงงานที่แพง, และ metrics ไว้ใกล้ handler เพื่อให้เวลาที่จับได้สะท้อนงานจริง
+
+## สองแบบ: unary และ streaming
+
+เพราะ gRPC มีทั้ง call แบบ unary และ streaming มันจึงมี interceptor **สอง** ชนิด:
+
+- **unary interceptor** ห่อ call แบบ request/response ตัวเดียว มันเห็น request, เรียก handler, แล้วเห็น response — จบในช็อตเดียว
+- **stream interceptor** ห่อ call แบบ streaming โดย default มันไม่เห็นแต่ละ message มันห่อ *stream object* ดังนั้นถ้าจะสังเกตแต่ละ message คุณต้องห่อ method send/receive ของ stream
+
+ความไม่สมมาตรตรงนี้ทำคนสะดุด: logging interceptor ที่เขียนไว้สำหรับ unary จะไม่ log ทุก message ที่ stream อัตโนมัติ — คุณต้องห่อ stream เอง
+
+## logging interceptor แบบ minimal
+
+ด้านล่างคือ logging ฝั่ง server ที่บันทึก method และเวลาที่ใช้ของทุก unary call
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func loggingUnary(
+        ctx context.Context, req any, info *grpc.UnaryServerInfo,
+        handler grpc.UnaryHandler,
+    ) (any, error) {
+        start := time.Now()
+        resp, err := handler(ctx, req) // call the next link (eventually your handler)
+        log.Printf("method=%s took=%s err=%v", info.FullMethod, time.Since(start), err)
+        return resp, err
+    }
+
+    server := grpc.NewServer(grpc.ChainUnaryInterceptor(loggingUnary))
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    class LoggingInterceptor(grpc.ServerInterceptor):
+        def intercept_service(self, continuation, handler_call_details):
+            method = handler_call_details.method
+            start = time.time()
+            handler = continuation(handler_call_details)  # the next link
+            logging.info("method=%s registered", method)
+            return handler  # wrap handler.unary_unary to time each call in practice
+
+    server = grpc.server(executor, interceptors=[LoggingInterceptor()])
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // @grpc/grpc-js exposes interceptors on the client; on the server,
+    // wrap handlers or use a middleware library such as nice-grpc.
+    const loggingUnary: ServerMiddleware = async function* (call, ctx) {
+      const start = Date.now();
+      try {
+        return yield* call.next(call.request, ctx);
+      } finally {
+        console.log(`method=${ctx.path} took=${Date.now() - start}ms`);
+      }
+    };
+    ```
+  </TabItem>
+</Tabs>
+
+interceptor ทำงานได้ทั้งสองฝั่ง: **server interceptor** บังคับ auth และบันทึก metrics; **client interceptor** แนบ token, เพิ่ม trace id และทำ retry พร้อม backoff แนวคิด chain เดียวกันใช้ได้ทั้งสองทิศทาง
+
+## การใช้งานที่พบบ่อย
+
+- **Logging & tracing** — ที่เดียวสำหรับบันทึก method, latency, status และ trace id
+- **Auth** — ตรวจ token จาก metadata แล้ว reject เร็ว ๆ ด้วย `UNAUTHENTICATED`
+- **Metrics** — นับ call และวัด latency ต่อ method สำหรับ dashboard
+- **Retry** — client interceptor สามารถ retry call ที่ idempotent เมื่อเจอ transient failure ได้แบบโปร่งใส
+- **Recovery** — จับ panic/exception ใน handler แล้วเปลี่ยนเป็น status `INTERNAL` ที่สะอาด แทนที่จะทำให้ connection พัง
+
+<Callout title="สรุปหนึ่งบรรทัด">
+interceptor คือ middleware ของ gRPC: chain ที่ห่อทุก call เพื่อให้ logging, auth, metrics และ retry อยู่ในที่เดียว แทนที่จะอยู่ในทุก handler จำไว้ว่ามีสองชนิด — unary ห่อ request/response, stream ห่อ stream object — ดังนั้นการ log call แบบ streaming หมายถึงต้องห่อ send/receive ของมัน ไม่ใช่แค่ห่อ call
+</Callout>
+
+export const quizIntc = [
+  {
+    q: 'interceptor ใน gRPC คืออะไร?',
+    options: [
+      'เครื่องมือที่แก้ .proto ตอน build',
+      'middleware ที่ห่อ call เพื่อรัน code ก่อนและหลัง handler',
+      'database trigger',
+      'load balancing policy',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมควรวาง auth interceptor ไว้ก่อน handler ใน chain?',
+    options: [
+      'มันรันเร็วกว่าตรงนั้น',
+      'เพื่อให้ call ที่ยังไม่ authenticate ถูก reject ก่อนถึงงานที่แพง',
+      'handler อ่าน metadata ไม่ได้',
+      'protobuf บังคับให้ทำ',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม unary logging interceptor ถึงไม่ log ทุก message ที่ stream อัตโนมัติ?',
+    options: [
+      'call แบบ streaming ไม่มี interceptor',
+      'stream interceptor ห่อ stream object ไม่ใช่แต่ละ message — คุณต้องห่อ send/receive เอง',
+      'message ที่ stream ไม่ใช่ message จริง',
+      'logging ถูกปิดตอน streaming',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'งานไหนเหมาะกับ client-side interceptor?',
+    options: [
+      'เก็บ row ลง database',
+      'แนบ auth token และ retry call ที่ idempotent เมื่อเจอ transient failure',
+      'compile .proto',
+      'render HTML',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/interceptors" questions={quizIntc} />
+
+<ProgressTracker client:visible id="production/interceptors" />

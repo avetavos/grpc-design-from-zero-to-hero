@@ -1,0 +1,111 @@
+---
+title: 'HTTP/2 & gRPC'
+description: 'ทำไม gRPC ต้องใช้ HTTP/2 — multiplexing บน connection เดียว, stream, binary framing และ header compression — และมันให้อะไรกับคุณ'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## gRPC คือ HTTP/2 ตั้งแต่ต้นจนจบ
+
+gRPC ไม่ได้คิดค้น transport ของตัวเอง gRPC call ทุกครั้งคือ **HTTP/2 request** — ชื่อ method คือ path, message คือ body และ metadata คือ header gRPC เป็น *convention ที่วางทับ HTTP/2* และนั่นคือเหตุผลที่มันได้คุณสมบัติที่สำคัญที่สุดของ HTTP/2 มาด้วย: **multiplexing**
+
+เข้าใจ feature ของ HTTP/2 แค่ 4 อย่างก็อธิบายพฤติกรรมของ gRPC ได้เกือบทั้งหมด
+
+## 1. Multiplexing: หลาย call, หนึ่ง connection
+
+ภายใต้ HTTP/1.1 หนึ่ง connection จัดการได้ทีละ request ยิงไป 10 request แล้วมันก็จะเข้าคิวบน connection เดียว (head-of-line blocking) หรือคุณต้องเปิด 10 connection
+
+HTTP/2 แบ่ง connection เดียวออกเป็น **stream** อิสระหลายเส้น แต่ละ gRPC call คือ 1 stream หลายสิบ call วิ่งบน TCP connection เดียวกันพร้อมกันได้ โดยไม่มีตัวไหนบล็อกตัวอื่น
+
+<Mermaid title="HTTP/1.1 head-of-line blocking เทียบกับ HTTP/2 multiplexed streams" code={muxDiagram} />
+
+export const muxDiagram = `flowchart TB
+  subgraph h1["HTTP/1.1 — ทีละอัน"]
+    direction LR
+    a["req A"] --> b["req B รอ"] --> c["req C รอ"]
+  end
+  subgraph h2["HTTP/2 — multiplexed streams"]
+    direction LR
+    conn["หนึ่ง connection"] --> sA["stream 1: call A"]
+    conn --> sB["stream 3: call B"]
+    conn --> sC["stream 5: call C"]
+  end`;
+
+นี่คือเหตุผลที่ gRPC client ถือ **channel** เส้นเดียวที่อยู่ยาว ๆ ไปยัง server แล้วใช้มันซ้ำกับทุกอย่าง — การเปิด connection ต่อ call จะทิ้งข้อได้เปรียบที่ใหญ่ที่สุดไป
+
+## 2. stream เป็นสองทิศทาง
+
+HTTP/2 stream ส่ง message ได้เป็นชุด **ทั้งสอง** ทิศทาง ไม่ใช่แค่ 1 request กับ 1 response gRPC เปิดสิ่งนี้ออกมาตรง ๆ เป็น call 4 แบบ (unary, server-streaming, client-streaming, bidirectional) — ซึ่งทั้งหมดเป็นแค่รูปแบบการใช้งานที่ต่างกันของ HTTP/2 stream เส้นเดียว streaming ไม่ได้ถูกแปะเพิ่มทีหลัง แต่เป็นรูปทรงดั้งเดิมของ transport เอง
+
+## 3. binary framing
+
+HTTP/1.1 เป็น protocol แบบ text ส่วน HTTP/2 แบ่งการสื่อสารออกเป็น **frame** แบบ binary (HEADERS frame, DATA frame) gRPC วาง protobuf message ไว้ใน DATA frame พร้อม prefix เล็ก ๆ ขนาด 5 byte (flag บอกการบีบอัดกับความยาว) ทุกอย่างบน wire เป็น binary และ length-delimited — parse เร็ว และ framing นี่แหละที่ทำให้ฝั่งรับรู้ว่า message หนึ่งจบตรงไหนและตัวถัดไปเริ่มตรงไหนใน stream
+
+## 4. header compression (HPACK)
+
+gRPC ส่ง metadata — auth token, trace ID, content type — เป็น HTTP/2 header ในทุก call **HPACK** ของ HTTP/2 บีบอัด header และจำตัวที่ส่งไปแล้ว ดังนั้น metadata ที่ซ้ำ ๆ (header `authorization` ตัวเดิมในทุก call) แทบไม่เสีย cost อะไรเลยหลังจากส่งครั้งแรก
+
+## นี่หมายความว่าอย่างไรต่อการออกแบบของคุณ
+
+เพราะ gRPC ทำงานบน HTTP/2 นิสัยการออกแบบหลายอย่างจึงตามมาโดยตรง:
+
+- **ใช้ channel ซ้ำ** หนึ่ง channel ต่อปลายทาง แชร์กันทุก call — การสร้าง channel ต่อ request คือการทิ้ง multiplexing ทิ้งไป
+- **call ช้าตัวเดียวจะไม่บล็อกตัวอื่น** บน connection เดียวกัน — แต่หนึ่ง connection ก็มีขีดจำกัด (จำนวน stream พร้อมกันสูงสุด) ซึ่งเป็นเหตุผลที่ load balancing ที่ L7 สำคัญ (มีในบทหลัง)
+- **streaming มี cost ต่ำ** เพราะมันเป็นโหมดดั้งเดิมของ transport ไม่ใช่การจำลอง
+- **คุณต้องมี HTTP/2 จริง ๆ ตลอดทาง** proxy และ load balancer ต้องพูด HTTP/2 ได้ ไม่งั้นมันจะทำให้ gRPC พัง — เป็นเซอร์ไพรส์ที่พบบ่อยมากตอน deploy ครั้งแรก
+
+<Callout title="สรุปในบรรทัดเดียว">
+gRPC เป็น convention บาง ๆ ที่วางทับ HTTP/2: method คือ path, message คือ binary DATA frame, metadata คือ header ที่ถูกบีบอัดด้วย HPACK และทุก call คือ multiplexed stream นั่นคือเหตุผลที่ channel เดียวรับได้หลาย call พร้อมกัน, ทำไม streaming ถึงเป็น native และทำไมทุก hop ใน infrastructure ของคุณต้องพูด HTTP/2 ได้
+</Callout>
+
+export const quizHttp2 = [
+  {
+    q: 'feature ไหนของ HTTP/2 ที่ทำให้หลาย gRPC call ใช้ connection เดียวร่วมกันได้โดยไม่บล็อกกัน?',
+    options: [
+      'header compression',
+      'multiplexed streams',
+      'TLS',
+      'chunked transfer encoding',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม gRPC client ถึงถือ channel เส้นเดียวที่อยู่ยาว ๆ แล้วใช้ซ้ำ?',
+    options: [
+      'เพื่อเลี่ยงการ authenticate ใหม่',
+      'เพราะ multiplexing ทำให้ connection เดียวรับทุก call พร้อมกันได้อย่างมีประสิทธิภาพ',
+      'เพราะ HTTP/2 ห้ามเปิดหลาย connection',
+      'เพื่อให้ JSON cache ยัง warm อยู่',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'gRPC วาง protobuf message ลงบน wire อย่างไร?',
+    options: [
+      'เป็น text ที่ pretty-print แล้ว',
+      'ไว้ใน binary HTTP/2 DATA frame พร้อม prefix ขนาด 5 byte บอกความยาว/การบีบอัด',
+      'เป็น URL query string',
+      'เป็น multipart form',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ปัญหาที่พบบ่อยตอน deploy ครั้งแรกซึ่งเกิดจากการที่ gRPC ต้องใช้ HTTP/2 คืออะไร?',
+    options: [
+      'database ปฏิเสธข้อมูล binary',
+      'proxy หรือ load balancer ที่พูดได้แค่ HTTP/1.1 ทำให้ connection พัง',
+      'browser cache response ไว้ตลอดกาล',
+      'ไฟล์ protobuf ใหญ่เกินไป',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/http2-and-grpc" questions={quizHttp2} />
+
+<ProgressTracker client:visible id="grpc-foundations/http2-and-grpc" />

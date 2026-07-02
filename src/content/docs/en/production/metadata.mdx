@@ -1,0 +1,141 @@
+---
+title: 'Metadata'
+description: 'Key/value headers and trailers that travel alongside a call — auth tokens, trace ids, request ids — how to read and write them, and how they propagate.'
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Data about the call, not in the message
+
+The request and response messages carry your *domain* data — a user, an order. But some information is *about the call itself*: who is calling, which trace this belongs to, what request id to log. Putting that inside every message would pollute your schema. gRPC gives it a separate channel: **metadata**.
+
+Metadata is a set of key/value pairs sent alongside a call, exactly like HTTP headers — which is literally what they become on the HTTP/2 wire.
+
+## Headers and trailers
+
+Metadata comes in two positions:
+
+- **Headers** travel *before* the message, at the start of the call. This is where a client puts an auth token or a trace id — anything the server needs up front.
+- **Trailers** travel *after* the response, at the end of the call. This is where a server puts information known only once work is done — like final status details or server-side metrics. Streaming responses especially rely on trailers, since the status can only be known after the last message.
+
+<Mermaid title="Where headers and trailers sit in a call" code={mdDiagram} />
+
+export const mdDiagram = `flowchart LR
+  client["client"] -->|"headers: authorization, x-trace-id"| server["server"]
+  server -->|"response message(s)"| client
+  server -->|"trailers: final status, metrics"| client`;
+
+## Reading and writing metadata
+
+A client sets headers before the call; the server reads them, and can send back headers and trailers.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // Client: attach metadata to the outgoing call.
+    ctx := metadata.AppendToOutgoingContext(ctx,
+        "authorization", "Bearer "+token,
+        "x-request-id", reqID,
+    )
+    resp, err := client.GetUser(ctx, req)
+
+    // Server: read incoming metadata.
+    md, _ := metadata.FromIncomingContext(ctx)
+    reqID := md.Get("x-request-id")
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Client: pass metadata as a list of (key, value) tuples.
+    metadata = [("authorization", f"Bearer {token}"), ("x-request-id", req_id)]
+    resp = client.GetUser(request, metadata=metadata)
+
+    # Server: read it off the context.
+    def GetUser(self, request, context):
+        incoming = dict(context.invocation_metadata())
+        req_id = incoming.get("x-request-id")
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // Client: build a Metadata object.
+    const md = new Metadata();
+    md.set('authorization', `Bearer ${token}`);
+    md.set('x-request-id', reqId);
+    client.getUser(request, md, (err, resp) => { /* ... */ });
+
+    // Server: read it off the call.
+    function getUser(call, callback) {
+      const reqId = call.metadata.get('x-request-id')[0];
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Rules and conventions
+
+- **Keys are lowercase.** gRPC normalizes metadata keys to lowercase ASCII; treat them case-insensitively.
+- **Binary values use a `-bin` suffix.** A key ending in `-bin` (e.g. `trace-context-bin`) is treated as raw bytes and base64-encoded on the wire; anything else must be a valid ASCII string.
+- **Don't reuse reserved keys.** Keys starting with `grpc-` are reserved by the framework — don't set them yourself.
+- **Metadata is not encrypted by itself** — its privacy comes from TLS on the channel. A token in metadata over an insecure channel is exposed.
+
+## Propagation across a call chain
+
+Metadata is how context flows through a chain of services. When service A calls B which calls C, you typically **propagate** the trace id and request id: each hop reads the incoming metadata and copies the relevant keys onto its outgoing calls, usually inside an interceptor so no handler has to remember. That is how a distributed trace stays stitched together across many gRPC hops.
+
+<Callout title="The one-line takeaway">
+Metadata is the key/value side channel for data *about* a call — auth tokens and trace ids as **headers** up front, final status details as **trailers** at the end. Keys are lowercase, `-bin` keys carry raw bytes, and privacy comes from TLS. Propagating trace and request ids through metadata (usually in an interceptor) is what keeps distributed traces intact across services.
+</Callout>
+
+export const quizMd = [
+  {
+    q: 'What is metadata used for in gRPC?',
+    options: [
+      'Storing the main domain data of a request',
+      'Carrying data about the call — auth tokens, trace ids, request ids — alongside the message',
+      'Defining the .proto schema',
+      'Compressing the payload',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the difference between headers and trailers?',
+    options: [
+      'Headers are binary, trailers are text',
+      'Headers travel before the message; trailers travel after the response (e.g. final status)',
+      'Trailers are only for clients',
+      'There is no difference',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does a metadata key ending in `-bin` mean?',
+    options: [
+      'It is a deprecated key',
+      'Its value is treated as raw bytes and base64-encoded on the wire',
+      'It is compressed twice',
+      'It is reserved by the framework',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How do trace ids stay connected across A → B → C?',
+    options: [
+      'gRPC copies all metadata automatically forever',
+      'Each hop propagates the trace/request id from incoming to outgoing metadata, usually in an interceptor',
+      'The database joins them',
+      'They are stored in the .proto',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/metadata" questions={quizMd} />
+
+<ProgressTracker client:visible id="production/metadata" />

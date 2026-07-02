@@ -1,0 +1,116 @@
+---
+title: 'Evolving Schemas'
+description: 'The rules that let a protobuf schema change without breaking deployed clients — the safe changes, the changes that silently corrupt data, and the reserved discipline.'
+sidebar:
+  order: 6
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Old and new must coexist
+
+In any real system, clients and servers deploy at different times. A new server will receive messages from old clients, and old servers will receive messages from new clients. Your schema must let **both directions keep working** — that is *backward* and *forward* compatibility, and protobuf is designed to make it achievable if you follow the rules.
+
+<Mermaid title="Schema changes must survive a mixed fleet" code={compatDiagram} />
+
+export const compatDiagram = `flowchart TB
+  newc["new client"] -->|extra fields| olds["old server\n(ignores unknown fields)"]
+  oldc["old client"] -->|missing new fields| news["new server\n(reads defaults)"]`;
+
+The mechanism that makes this work is the one you already know: **fields are identified by number.** An old server that receives a field number it doesn't recognize simply skips it. A new server that doesn't receive a field it expects reads the default. Numbers, not names, are what keep the peace.
+
+## Changes that are always safe
+
+These never break a deployed client:
+
+- **Add a new field** with a fresh, never-used number. Old code ignores it; new code reads it (default when absent).
+- **Remove a field** — *as long as you `reserved` its number* (below). Old clients that still send it are simply ignored.
+- **Rename a field.** The wire carries the number, so the name is free to change.
+- **Add a new value to an enum**, or a new field to a `oneof`. Old clients treat unknowns as unknown.
+- **Add a new RPC method** to a service. Existing clients don't call it; nothing breaks.
+
+## Changes that break — silently
+
+These compile fine and then corrupt data or crash clients in production:
+
+- **Reusing a deleted field's number** for a different field. Old bytes get decoded as the new type. This is the classic disaster.
+- **Changing a field's type** in an incompatible way (e.g. `int32` → `string`). The wire bytes no longer match the reader's expectation.
+- **Renumbering an existing field.** Every deployed client still uses the old number; you've just swapped two fields' meanings.
+- **Changing a field between `repeated` and singular**, or moving a field in or out of a `oneof`.
+
+The through-line: **anything that changes what a number means is a breaking change**, even though the `.proto` still compiles.
+
+## The reserved discipline
+
+Because the danger is *reuse*, the defense is simple and mechanical: **when you delete a field, immediately `reserved` its number and name.**
+
+```proto
+message User {
+  reserved 3, 7;                 // retired field numbers — never reuse
+  reserved "email", "phone";     // retired names — catch accidental re-adds
+
+  int64  id       = 1;
+  string name     = 2;
+  bool   verified = 4;
+}
+```
+
+Now the compiler is your safety net: any future attempt to reuse number `3` or the name `email` fails to build. Tools like **buf** go further and can detect breaking changes automatically in CI by comparing your `.proto` against the previously published version — turning "did I just break every client?" into a failing pull request instead of a 2 a.m. incident.
+
+## Version in the package, not by breaking
+
+When you truly must make an incompatible change, don't mutate the existing message — publish a new package version (`user.v2`) alongside `user.v1` and migrate clients over time. That's why you see `package user.v1;` everywhere: the version is baked into the type path so v1 and v2 can coexist.
+
+<Callout title="The one-line takeaway">
+Protobuf compatibility rests on one fact: **numbers identify fields, names don't.** Adding fields, removing-and-reserving them, and renaming are safe; reusing or renumbering a tag silently corrupts data. Delete a field → `reserved` its number; need a breaking change → ship a new package version. Let a tool like buf enforce it in CI.
+</Callout>
+
+export const quizEvolve = [
+  {
+    q: 'What makes protobuf schema evolution possible at all?',
+    options: [
+      'Every client re-downloads the schema on each call',
+      'Fields are identified by number, so unknown fields are skipped and missing ones read as defaults',
+      'Protobuf converts everything to JSON first',
+      'gRPC blocks old clients automatically',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which change is guaranteed safe?',
+    options: [
+      'Reusing a deleted field number for a new field',
+      'Adding a new field with a fresh, never-used number',
+      'Changing a field from int32 to string',
+      'Renumbering an existing field',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why is reusing a deleted field number so dangerous?',
+    options: [
+      'It slows down encoding',
+      'Old clients still send that number, so their bytes get decoded as the new field — silent corruption',
+      'The compiler refuses to build it',
+      'It only breaks the documentation',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When you must make a truly incompatible change, what is the recommended approach?',
+    options: [
+      'Renumber the fields in place',
+      'Publish a new package version (e.g. user.v2) alongside the old one',
+      'Delete the old .proto',
+      'Switch the whole service to JSON',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/evolving-schemas" questions={quizEvolve} />
+
+<ProgressTracker client:visible id="protocol-buffers/evolving-schemas" />

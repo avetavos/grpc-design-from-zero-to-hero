@@ -1,0 +1,131 @@
+---
+title: 'Enums, Nested & oneof'
+description: 'enum กับ zero value ที่บังคับต้องมี, การ nest message เพื่อโครงสร้าง และ oneof สำหรับ field ที่เลือกได้อย่างเดียว'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## enum: ชุด value ที่มีชื่อ
+
+**enum** คือ field ที่เป็นได้เพียงหนึ่งในชุด integer ที่มีชื่อกำหนดไว้ตายตัว มันสื่อ intent และกัน state ที่ไม่ถูกต้องได้ดีกว่า `int32` หรือ `string` เปล่า ๆ มาก
+
+```proto
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE      = 1;
+  STATUS_SUSPENDED   = 2;
+  STATUS_CLOSED      = 3;
+}
+
+message Account {
+  int64  id     = 1;
+  Status status = 2;
+}
+```
+
+## กฎ zero value
+
+มีกฎหนึ่งข้อที่ข้ามไม่ได้: **value แรกของ enum ต้องเป็น `0` และควรหมายถึง "unspecified"** เพราะ proto3 ไม่มี null ให้ scalar field enum ที่ไม่ถูก set จะอ่านได้เป็น zero value ถ้า `0` แปลว่า `ACTIVE` ทุก account ที่ลืม set status จะดูเหมือน active แบบเงียบ ๆ
+
+<Mermaid title="ทำไม zero value ต้องหมายถึง 'unspecified'" code={enumDiagram} />
+
+export const enumDiagram = `flowchart TB
+  unset["field ไม่ถูก set"] --> zero["อ่านได้เป็น value 0"]
+  zero --> good["0 = UNSPECIFIED\n→ ปลอดภัย เห็นชัดว่าไม่มีค่า"]
+  zero --> bad["0 = ACTIVE\n→ อันตราย ดูเหมือนตั้งใจ"]`;
+
+convention (ที่ใช้ทั่ว API ของ Google) คือตั้งชื่อว่า `<ENUM>_UNSPECIFIED = 0` มันให้ state "ไม่มีค่า" ที่ชัดเจน และเก็บ value ที่มีความหมายไว้ให้การเลือกแบบตั้งใจ การเพิ่ม enum value ใหม่ภายหลังเป็น change ที่ปลอดภัยแบบ backward-compatible — client เก่าจะมองค่าที่ไม่รู้จักเป็น unknown เฉย ๆ
+
+## nested message
+
+message ใส่ message อื่นข้างในได้ การ nest จัดกลุ่มข้อมูลที่เกี่ยวข้อง และให้ reuse type หรือจำกัด scope ของ type ไว้กับ message ที่เป็นเจ้าของ
+
+```proto
+message Order {
+  int64 id = 1;
+
+  message LineItem {          // scope อยู่ใน Order (Order.LineItem)
+    string sku      = 1;
+    int32  quantity = 2;
+  }
+
+  repeated LineItem items = 2;
+  Address shipping        = 3;  // message ระดับบนสุดที่ reuse มาใช้ที่นี่
+}
+```
+
+nest type เมื่อมันมีความหมายเฉพาะตอนอยู่ใน parent (`Order.LineItem`) และเก็บไว้ระดับบนสุดเมื่อหลาย message ใช้ร่วมกัน (`Address`)
+
+## oneof: เลือกได้อย่างเดียวจากหลาย field
+
+**oneof** บอกว่า "set ได้มากสุดหนึ่ง field ในกลุ่มนี้ต่อครั้ง" การ set ตัวหนึ่งจะล้างตัวอื่น และ generated code ให้วิธีเช็กชัด ๆ ว่าตัวไหนถูก set
+
+```proto
+message Notification {
+  int64 user_id = 1;
+
+  oneof channel {
+    string email        = 2;
+    string sms_number   = 3;
+    string push_token   = 4;
+  }
+}
+```
+
+ตรงนี้ notification ส่งออกผ่าน channel เดียวเป๊ะ ๆ `oneof` model "tagged union" ได้แม่นยำ — ดีกว่า field nullable สามตัวกับ comment ที่หวังว่าจะมีตัวเดียวถูกกรอกเยอะ และยังประหยัด memory เพราะ field เหล่านั้นใช้ storage ร่วมกัน
+
+<Callout title="สรุปหนึ่งบรรทัด">
+ใช้ **enum** กับชุด value ที่ตายตัว — แต่ให้ value `0` หมายถึง `UNSPECIFIED` เสมอ ไม่งั้น field ที่ไม่ถูก set จะปลอมเป็นค่าจริง **nest** message ที่เป็นของ parent เดียว และเก็บตัวที่ใช้ร่วมกันไว้ระดับบนสุด ใช้ **oneof** เมื่อควร set ได้ตัวเดียวจากหลาย field เพื่อให้ schema บังคับกฎ "เลือกหนึ่ง" แทนที่จะเป็น comment ที่ได้แต่หวัง
+</Callout>
+
+export const quizEnum = [
+  {
+    q: 'ทำไม value แรกของ enum ต้องเป็น 0 และหมายถึง "unspecified"?',
+    options: [
+      'protobuf เรียง enum ตามตัวเลข',
+      'enum ที่ไม่ถูก set อ่านได้เป็น 0 ดังนั้น 0 ต้องเป็น "ไม่มีค่า" ที่ปลอดภัย ไม่ใช่ค่าจริง',
+      'zero encode เร็วกว่า',
+      'เป็นแค่ style ที่ไม่มีผลอะไร',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ควร nest message ไว้ในอีก message แทนที่จะเป็นระดับบนสุดเมื่อไร?',
+    options: [
+      'เสมอ — การ nest เป็นสิ่งที่บังคับ',
+      'เมื่อ type นั้นมีความหมายเฉพาะใน parent และไม่ได้ถูกใช้ร่วมกัน',
+      'เฉพาะเมื่อมีมากกว่าห้า field',
+      'ไม่มีทาง — proto3 ห้าม nest',
+    ],
+    answer: 1,
+  },
+  {
+    q: '`oneof` รับประกันอะไร?',
+    options: [
+      'ทุก field ที่ list ไว้ถูก set พร้อมกันเสมอ',
+      'set ได้มากสุดหนึ่ง field ในกลุ่มต่อครั้ง',
+      'field ถูกเข้ารหัส',
+      'field ต้องเป็น string ทั้งหมด',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'การเพิ่ม value ใหม่ให้ enum ที่มีอยู่แล้วเป็น:',
+    options: [
+      'breaking change ที่ client เก่ารับไม่ได้',
+      'change แบบ backward-compatible — client เก่ามองเป็น unknown',
+      'ทำไม่ได้หลัง release แรก',
+      'ทำได้เฉพาะเมื่อ renumber ทุก value',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/enums-nested-oneof" questions={quizEnum} />
+
+<ProgressTracker client:visible id="protocol-buffers/enums-nested-oneof" />

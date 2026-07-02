@@ -1,0 +1,131 @@
+---
+title: 'Designing Methods'
+description: 'Wrapper request/response messages, naming conventions, pagination, and idempotency — the habits that keep an API healthy as it grows.'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The API you ship is forever
+
+A method signature is a promise. Once clients depend on it, you can only change it in backward-compatible ways — or bump the whole package to `v2`. So the design habits below aren't polish; they're what let an API survive years of change without a painful migration.
+
+## Always wrap requests and responses
+
+The single most valuable rule: **every method gets its own request message and its own response message.** Never take or return a bare scalar, and never reuse a domain message as a request.
+
+```proto
+// Do this
+rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+message DeleteUserRequest  { int64 id = 1; }
+message DeleteUserResponse {}   // empty today, has room tomorrow
+```
+
+```proto
+// Avoid this
+rpc DeleteUser(int64) returns (google.protobuf.Empty);
+```
+
+Why the wrappers, even when they're empty today?
+
+- **Room to grow.** Adding a `soft_delete` flag to the request, or a `deleted_at` timestamp to the response, is a safe additive change. A bare scalar or shared `Empty` has nowhere to add it.
+- **Clarity.** `DeleteUserRequest` documents intent better than `int64`.
+- **Consistency.** Every method looks the same, so tooling and readers never have to special-case anything.
+
+## Naming conventions
+
+Follow the conventions the code generators expect, and the generated client will read naturally in every language:
+
+- **Methods: `VerbNoun` in PascalCase** — `GetUser`, `CreateOrder`, `ListInvoices`, `BatchUpdateItems`. Standard verbs (`Get`, `List`, `Create`, `Update`, `Delete`) set clear expectations.
+- **Messages: `MethodNameRequest` / `MethodNameResponse`** — `ListUsersRequest`, `ListUsersResponse`.
+- **Fields: `snake_case`** — `user_id`, `page_size`, `created_at`. Generators convert to each language's casing.
+
+## Pagination: never return an unbounded list
+
+A `ListUsers` that returns *all* users will eventually return millions and fall over. Design list methods to page from the start, using the widely adopted token pattern:
+
+```proto
+message ListUsersRequest {
+  int32  page_size  = 1;  // how many to return
+  string page_token = 2;  // opaque cursor from the previous response
+}
+
+message ListUsersResponse {
+  repeated User users           = 1;
+  string        next_page_token = 2;  // empty when there are no more
+}
+```
+
+<Mermaid title="Token-based pagination: each response hands you the key to the next page" code={pageDiagram} />
+
+export const pageDiagram = `flowchart LR
+  r1["ListUsers(page_size=50)"] --> p1["50 users +\nnext_page_token=abc"]
+  p1 --> r2["ListUsers(token=abc)"]
+  r2 --> p2["next 50 +\nnext_page_token=def"]
+  p2 --> r3["... until token is empty"]`;
+
+The client keeps passing the returned `next_page_token` back until it comes back empty. The token is **opaque** — the server decides what it encodes (an offset, a cursor, a keyset), and clients must never parse it. That freedom lets you change the pagination strategy later without touching a single client.
+
+## Idempotency: make retries safe
+
+Networks fail, and clients retry. If a retried `CreatePayment` charges the customer twice, that's a design bug, not bad luck. Make mutating methods **idempotent** where you can — commonly with a client-supplied request id the server deduplicates:
+
+```proto
+message CreatePaymentRequest {
+  Payment payment    = 1;
+  string  request_id = 2;  // client-generated; server ignores duplicates
+}
+```
+
+The server records each `request_id`; a repeat returns the original result instead of charging again. `Get`/`List` are naturally idempotent; `Delete` usually is; `Create` needs help like this.
+
+<Callout title="The one-line takeaway">
+Give every method a dedicated request and response message so it can grow; name things the way the generators expect; page list results with an opaque `page_token`; and make mutations idempotent with a client-supplied `request_id`. These four habits are what let a gRPC API evolve for years without breaking its clients.
+</Callout>
+
+export const quizDesign = [
+  {
+    q: 'Why wrap every method in its own request/response message, even empty ones?',
+    options: [
+      'To make messages bigger',
+      'So you can add fields later as safe, backward-compatible changes',
+      'Because scalars are not allowed',
+      'To slow down clients for rate limiting',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the recommended casing for protobuf field names?',
+    options: ['camelCase', 'PascalCase', 'snake_case', 'SCREAMING_CASE'],
+    answer: 2,
+  },
+  {
+    q: 'Why must a page_token be opaque to clients?',
+    options: [
+      'To hide it from logs',
+      'So the server can change its pagination strategy without breaking clients',
+      'Because tokens are encrypted by gRPC',
+      'To make it shorter',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How do you commonly make a Create method safe to retry?',
+    options: [
+      'Disable retries entirely',
+      'Include a client-supplied request_id the server deduplicates',
+      'Return an error on the second call',
+      'Use a bigger deadline',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/designing-methods" questions={quizDesign} />
+
+<ProgressTracker client:visible id="service-definition/designing-methods" />

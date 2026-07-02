@@ -1,0 +1,111 @@
+---
+title: 'gRPC vs REST'
+description: 'Where each approach fits, the real performance and tooling trade-offs, and honest guidance on when NOT to reach for gRPC.'
+sidebar:
+  order: 3
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Two different mental models
+
+REST and gRPC solve the same broad problem — one program talking to another — but they frame it differently.
+
+- **REST** thinks in **resources**. You have nouns (`/users/42`), and you act on them with a small fixed set of verbs (`GET`, `POST`, `PUT`, `DELETE`). The data is usually JSON, and the contract is often a document (OpenAPI) or just convention.
+- **gRPC** thinks in **procedures**. You have methods (`GetUser`, `CreateOrder`, `StreamPrices`), each with a typed request and response defined in a `.proto`. The data is binary protobuf, and the contract is the schema itself.
+
+Neither model is "correct" — they optimize for different things.
+
+## The honest comparison
+
+| | REST + JSON | gRPC + Protobuf |
+|--|-------------|-----------------|
+| **Payload** | Text (JSON) — human-readable, larger | Binary — compact, fast to parse |
+| **Contract** | Optional (OpenAPI / convention) | Mandatory (`.proto`), enforced by codegen |
+| **Browser support** | Native, universal | Needs gRPC-Web + a proxy |
+| **Streaming** | Awkward (SSE, long-poll) | First-class, bidirectional |
+| **Human debuggability** | `curl` and read it | Needs tooling (`grpcurl`, reflection) |
+| **Codegen / type safety** | Add-on, varies | Built in, across 11+ languages |
+| **Best fit** | Public APIs, browsers, simple CRUD | Internal service-to-service, low latency, streaming |
+
+## Why gRPC is faster (and when it matters)
+
+Two things make gRPC efficient on the wire:
+
+<Mermaid title="Where gRPC saves time versus REST/JSON" code={perfDiagram} />
+
+export const perfDiagram = `flowchart TB
+  subgraph rest["REST + JSON"]
+    r1["parse text JSON\n(reflective, larger)"] --> r2["new connection\nor HTTP/1.1 head-of-line"]
+  end
+  subgraph grpc["gRPC + Protobuf"]
+    g1["decode binary protobuf\n(schema-driven, compact)"] --> g2["HTTP/2 multiplexing\nmany calls, one connection"]
+  end`;
+
+1. **Protobuf is smaller and cheaper to decode than JSON.** Fields are tagged by number, not by name, and values are packed as binary. There is no reflective key-matching and no text parsing.
+2. **HTTP/2 multiplexing** lets many in-flight calls share one connection without blocking each other (the next lesson goes deep on this).
+
+But be honest about scale: for a request every few seconds, this difference is invisible. It matters when you make **thousands of calls per second** between services, or move large/streaming payloads.
+
+## When NOT to use gRPC
+
+gRPC is a great default for internal microservices, but it is the wrong tool when:
+
+- **The client is a browser and you can't run a proxy.** Browsers can't speak raw gRPC; you need gRPC-Web plus a translating proxy (Envoy or the built-in one). For a simple public web API, REST is less friction.
+- **You want a public, third-party-friendly API.** Most external developers expect `curl`, JSON, and an OpenAPI page. gRPC raises the barrier to entry.
+- **The API is trivial CRUD with low traffic.** The `.proto` toolchain and binary debugging are overhead you won't recoup.
+- **Human-readable traffic is a hard requirement** (some compliance or debugging setups). Binary frames need extra tooling to inspect.
+
+<Callout title="A practical rule of thumb">
+Reach for **gRPC between your own services** — where you control both ends, want type-safe contracts, and care about latency or streaming. Reach for **REST at the edge** — public APIs, browser clients, and simple integrations where ubiquity and `curl`-ability win. Many systems use both: gRPC internally, a REST/JSON gateway facing the world (a pattern we cover in the Ecosystem module).
+</Callout>
+
+export const quizVs = [
+  {
+    q: 'What is the core framing difference between REST and gRPC?',
+    options: [
+      'REST is always faster than gRPC',
+      'REST thinks in resources/URLs; gRPC thinks in methods/messages',
+      'gRPC cannot return errors',
+      'REST requires HTTP/2',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which is a genuine reason to prefer REST over gRPC?',
+    options: [
+      'You need first-class bidirectional streaming',
+      'You are building a public API meant to be called with curl from a browser',
+      'You make thousands of internal calls per second',
+      'You want enforced contracts and codegen',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why is protobuf typically faster to process than JSON?',
+    options: [
+      'It is compressed with gzip by default',
+      'Fields are tagged by number and packed as binary — no text parsing or key matching',
+      'It skips validation entirely',
+      'It caches responses automatically',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What extra piece does a browser need to talk to a gRPC service?',
+    options: [
+      'Nothing — browsers speak gRPC natively',
+      'gRPC-Web plus a translating proxy',
+      'A second TCP port',
+      'A JSON-to-XML converter',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/grpc-vs-rest" questions={quizVs} />
+
+<ProgressTracker client:visible id="grpc-foundations/grpc-vs-rest" />

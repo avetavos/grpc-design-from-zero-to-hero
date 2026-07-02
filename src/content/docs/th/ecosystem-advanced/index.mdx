@@ -1,0 +1,82 @@
+---
+title: 'Ecosystem & Advanced'
+description: 'จุดที่ gRPC มาเจอกับโลกภายนอก — browser, REST client, API หลาย version และ tooling ที่ทำให้ service ทั้ง fleet observe และ test ได้'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## เลยจาก happy path
+
+มาถึงตรงนี้คุณออกแบบ schema, นิยาม service, implement, stream และทำ security ได้แล้ว โมดูลสุดท้ายนี้พูดถึงทุกอย่างที่อยู่**รอบ ๆ** core นั้น — ความจริงที่ว่า gRPC service ของคุณแทบไม่เคยอยู่ตัวเดียว
+
+browser พูด gRPC แบบ native ไม่ได้ client บางตัวยังอยากได้ REST กับ JSON API ของคุณจะอยู่นานกว่า version แรกเสมอ และ service ทั้ง fleet ต้อง observe กับ test ได้ แต่ละเรื่องมีเครื่องมือที่แก้ปัญหาไว้แล้ว และโมดูลนี้จะพาไปดูทีละอัน
+
+## โมดูลนี้ครอบคลุมอะไรบ้าง
+
+| บทเรียน | สิ่งที่คุณจะได้เรียนรู้ |
+|--------|-------------------|
+| gRPC-Web | ทำไม browser ต้องมี proxy, gRPC-Web protocol และ Connect |
+| gRPC-Gateway & transcoding | เปิด REST/JSON facade จาก `.proto` เดียวกัน |
+| Versioning & evolution | package แบบมี version, additive vs breaking change, `buf breaking` |
+| Observability & testing | reflection, tracing/metrics และ in-process testing |
+
+## หน้าตาของ deployment จริง
+
+ระบบ gRPC บน production มักไม่ได้หน้าตาแบบ "client เรียก server ตัวเดียว" แต่เป็น ecosystem เล็ก ๆ ของตัวแปลและตัว observe:
+
+<Mermaid title="gRPC core เดียว มีทางเข้าออกหลายทาง" code={ecoDiagram} />
+
+export const ecoDiagram = `flowchart TB
+  browser["browser\n(gRPC-Web)"] --> proxy["proxy /\ntranscoder"]
+  rest["REST client\n(JSON)"] --> proxy
+  proxy --> core["gRPC services\n(v1, v2)"]
+  svc["other gRPC\nservices"] --> core
+  core --> obs["interceptors →\nmetrics · traces · logs"]`;
+
+`.proto` ที่คุณเขียนยังเป็น single source of truth อยู่ ทุกอย่างตรงนี้ — web client, REST gateway, API version ถัดไป, tracing — ล้วนแขวนอยู่บน contract เดียวกันนั้น
+
+<Callout title="สรุปหนึ่งบรรทัด">
+gRPC แทบไม่เคยอยู่ตัวเดียว browser เข้าถึงผ่าน gRPC-Web, REST client ผ่าน transcoding และทั้ง caller เก่าและใหม่ผ่าน package แบบมี version — ขณะที่ interceptor ทำให้ทั้ง fleet observe ได้ โดยมี `.proto` เป็นจุดยึดที่ทุกอย่าง generate ออกมา
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'ทำไมระบบ gRPC บน production มักต้องมี component เพิ่มรอบ core?',
+    options: [
+      'เพราะ gRPC server รับได้ client เดียว',
+      'เพราะ browser, REST client, versioning และ observability ต่างต้องมีตัวแปลหรือ tooling',
+      'เพราะ protobuf ต้องแปลงเป็น XML',
+      'เพราะ HTTP/2 ใช้บน production ไม่ได้',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'อะไรที่ยังเป็น single source of truth ข้าม web client, REST gateway และ version ต่าง ๆ?',
+    options: [
+      'load balancer',
+      '`.proto` contract',
+      'database schema',
+      'ไฟล์ config ของ API gateway',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'gRPC service มักจะ observe ได้ด้วยวิธีไหน?',
+    options: [
+      'เขียน log ลงไฟล์เองใน handler ทุกตัว',
+      'ผ่าน interceptor ที่เพิ่ม metrics, traces และ logs',
+      'observe ไม่ได้',
+      'เปลี่ยนไปใช้ REST',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/index" />

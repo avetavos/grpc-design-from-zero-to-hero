@@ -1,0 +1,153 @@
+---
+title: 'Errors & Status Codes'
+description: 'The gRPC status code model, how to return meaningful errors, and rich errors with google.rpc.Status and error details.'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Errors are part of the contract
+
+gRPC does not use HTTP status codes. Every call completes with a **gRPC status**: a numeric `code`, an optional human `message`, and optional structured `details`. A successful call returns `OK`; anything else is an error the client receives as a typed status, not a parsed response body.
+
+Choosing the right code is a design decision — clients branch on it, retry on it, and page you on it. Vague codes make an API frustrating; precise ones make it self-explanatory.
+
+## The status codes you'll actually use
+
+There are ~17 codes. A handful cover almost everything:
+
+| Code | Meaning | Typical cause |
+|------|---------|---------------|
+| `OK` | Success | — |
+| `INVALID_ARGUMENT` | The request is malformed | Client sent a bad field; fixing the input would help |
+| `NOT_FOUND` | The entity doesn't exist | `GetUser` on a missing id |
+| `ALREADY_EXISTS` | Entity already exists | `CreateUser` with a taken email |
+| `PERMISSION_DENIED` | Authenticated but not allowed | Caller lacks the role |
+| `UNAUTHENTICATED` | No valid credentials | Missing or invalid token |
+| `FAILED_PRECONDITION` | System state is wrong for this call | Delete a non-empty bucket |
+| `RESOURCE_EXHAUSTED` | Quota or rate limit hit | Too many requests |
+| `DEADLINE_EXCEEDED` | The call ran past its deadline | Slow server or network |
+| `UNAVAILABLE` | Server is down or unreachable | Transient; usually safe to retry |
+| `INTERNAL` | A bug on the server | Unexpected failure |
+
+Two distinctions trip people up:
+
+- **`INVALID_ARGUMENT` vs `FAILED_PRECONDITION`** — the first means "your input is wrong, fixing it will help"; the second means "your input is fine, but the system isn't in a state where this can succeed."
+- **`UNAUTHENTICATED` vs `PERMISSION_DENIED`** — the first means "I don't know who you are"; the second means "I know who you are, and you're not allowed."
+
+`UNAVAILABLE` and `DEADLINE_EXCEEDED` matter for retries: they signal *transient* failures, so clients (and interceptors) commonly retry them, while `INVALID_ARGUMENT` should never be retried unchanged.
+
+## Returning an error
+
+You don't `return` an error message in the response — you complete the call with a status. Every language exposes the same idea:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    import (
+        "google.golang.org/grpc/codes"
+        "google.golang.org/grpc/status"
+    )
+
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        u, ok := s.store[req.Id]
+        if !ok {
+            return nil, status.Errorf(codes.NotFound, "user %d not found", req.Id)
+        }
+        return u, nil
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    import grpc
+
+    def GetUser(self, request, context):
+        user = self.store.get(request.id)
+        if user is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"user {request.id} not found")
+        return user
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    import { status } from '@grpc/grpc-js';
+
+    getUser(call, callback) {
+      const user = this.store.get(call.request.id);
+      if (!user) {
+        callback({ code: status.NOT_FOUND, message: `user ${call.request.id} not found` });
+        return;
+      }
+      callback(null, user);
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+On the client side, the same status comes back as a typed error carrying `code` and `message` — so the caller can branch on `NOT_FOUND` versus `UNAVAILABLE` without string-matching.
+
+## Rich errors with details
+
+A code and a message are often enough. When they aren't — when the client needs *machine-readable* specifics, like which fields failed validation — gRPC has a richer model: `google.rpc.Status` carries a repeated `details` list of typed messages.
+
+<Mermaid title="A gRPC error: code + message, optionally with structured details" code={errorDiagram} />
+
+export const errorDiagram = `flowchart LR
+  err["gRPC status"] --> code["code: INVALID_ARGUMENT"]
+  err --> msg["message: validation failed"]
+  err --> det["details[]"]
+  det --> bad["BadRequest {\n field: email,\n desc: not a valid address }"]`;
+
+The standard detail types (`BadRequest`, `ErrorInfo`, `QuotaFailure`, `RetryInfo`, and others from `google.rpc`) let a server say precisely "field `email` is invalid" or "retry after 3 seconds", and let clients react programmatically. Use plain codes for the common case; reach for rich details when the client genuinely needs structured error data.
+
+<Callout title="The one-line takeaway">
+gRPC calls end in a **status** — a `code`, a `message`, and optional `details` — not an HTTP code. Pick codes precisely (`NOT_FOUND` vs `INVALID_ARGUMENT` vs `FAILED_PRECONDITION`; `UNAUTHENTICATED` vs `PERMISSION_DENIED`), since clients retry and branch on them. Reach for `google.rpc.Status` details when the client needs machine-readable specifics.
+</Callout>
+
+export const quizErrors = [
+  {
+    q: 'How does a gRPC call report failure?',
+    options: [
+      'An HTTP 4xx/5xx status code',
+      'A gRPC status with a numeric code, a message, and optional details',
+      'A special field in the response message',
+      'By closing the TCP connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'A client sends a well-formed request but the target bucket is not empty, so the delete cannot proceed. Which code fits best?',
+    options: ['INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'NOT_FOUND', 'INTERNAL'],
+    answer: 1,
+  },
+  {
+    q: 'What is the difference between UNAUTHENTICATED and PERMISSION_DENIED?',
+    options: [
+      'They are identical',
+      'UNAUTHENTICATED = we don\'t know who you are; PERMISSION_DENIED = we do, and you\'re not allowed',
+      'PERMISSION_DENIED is only for admins',
+      'UNAUTHENTICATED means the server is down',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When should you use google.rpc.Status details instead of just a code and message?',
+    options: [
+      'Always, for every error',
+      'When the client needs machine-readable specifics, like which fields failed validation',
+      'Only for OK responses',
+      'Never — details are deprecated',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/errors-and-status-codes" questions={quizErrors} />
+
+<ProgressTracker client:visible id="service-definition/errors-and-status-codes" />

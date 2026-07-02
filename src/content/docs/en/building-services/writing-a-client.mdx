@@ -1,0 +1,145 @@
+---
+title: 'Writing a Client'
+description: 'Create a channel, get a stub, make the call, and handle the typed response and error — plus why you reuse one channel for everything.'
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Channel, stub, call
+
+A gRPC client is built from two objects:
+
+- A **channel** — the long-lived connection to a server address (`host:port`). It manages the underlying HTTP/2 connection(s), reconnection, and load balancing.
+- A **stub** — a thin typed wrapper created *from* the channel, exposing one method per `rpc`. Calling `stub.GetUser(req)` sends the request over the channel and returns the response.
+
+<Mermaid title="A channel carries every call; the stub is the typed face" code={clientDiagram} />
+
+export const clientDiagram = `flowchart LR
+  stub["stub.GetUser(req)"] --> channel["channel\n(host:port, HTTP/2)"]
+  stub2["stub.GetUser(req2)"] --> channel
+  channel -->|multiplexed| server["server :50051"]`;
+
+Both stubs use the **same** channel — that's the point. The channel is expensive to create and cheap to share; the stub is just a typed handle on top.
+
+## Making the call
+
+Here is a full client that creates a channel, builds a stub, calls `GetUser`, and handles both the response and a possible error:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, err := grpc.NewClient("localhost:50051",
+        grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close() // close the channel when the program ends, not per call
+
+    client := userv1.NewUserServiceClient(conn) // stub
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if err != nil {
+        st, _ := status.FromError(err) // inspect the gRPC status
+        log.Fatalf("call failed: %s — %s", st.Code(), st.Message())
+    }
+    fmt.Println(user.Name)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel("localhost:50051")
+    client = user_pb2_grpc.UserServiceStub(channel)  # stub
+
+    try:
+        user = client.GetUser(user_pb2.GetUserRequest(id=42))
+        print(user.name)
+    except grpc.RpcError as e:
+        print(f"call failed: {e.code()} — {e.details()}")  # inspect the status
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const channel = new UserServiceClient(
+      'localhost:50051',
+      credentials.createInsecure(),
+    ); // channel + stub in one
+
+    channel.getUser({ id: 42 }, (err, user) => {
+      if (err) {
+        console.error(`call failed: ${err.code} — ${err.details}`);
+        return;
+      }
+      console.log(user.name);
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+Notice the error is not an exception about the network — it is a **status** with a code (`NOT_FOUND`, `DEADLINE_EXCEEDED`, `UNAVAILABLE`) and a message. Clients branch on that code.
+
+## Reuse the channel — do not create one per call
+
+The single most common client mistake is creating a fresh channel for every request. A channel sets up HTTP/2 connections, name resolution, and load-balancing state — doing that per call throws away gRPC's biggest efficiency and can exhaust sockets under load.
+
+**Create one channel per target, at startup, and share it** across all calls and all stubs. Close it only when the program shuts down.
+
+## Blocking vs async
+
+The generated stub usually offers both styles: a **blocking/synchronous** call that returns the response (simplest for scripts and request handlers) and an **async/future** variant that returns immediately and completes later (useful for fan-out or non-blocking servers). Pick per call site; both go over the same channel.
+
+<Callout title="The one-line takeaway">
+A client is a **channel** (the long-lived connection) plus a **stub** (the typed method surface). Create the channel once at startup and share it everywhere; calling `stub.GetUser(req)` returns a typed response or a **status** error you branch on. Never create a channel per call.
+</Callout>
+
+export const quizClient = [
+  {
+    q: 'What are the two objects a gRPC client is built from?',
+    options: [
+      'A socket and a buffer',
+      'A channel (the connection) and a stub (the typed methods)',
+      'A request and a response',
+      'A proxy and a cache',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the most common client mistake?',
+    options: [
+      'Reusing one channel for all calls',
+      'Creating a fresh channel for every request',
+      'Setting a deadline',
+      'Using protobuf',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When a call fails, what does the client actually receive?',
+    options: [
+      'A generic network exception with no detail',
+      'A status with a code (e.g. NOT_FOUND) and a message',
+      'An HTTP 500 HTML page',
+      'A stack trace from the server',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'When should you close a channel?',
+    options: [
+      'After every call',
+      'When the program shuts down',
+      'Never',
+      'Before every call',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/writing-a-client" questions={quizClient} />
+
+<ProgressTracker client:visible id="building-services/writing-a-client" />

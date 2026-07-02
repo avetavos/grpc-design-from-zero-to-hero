@@ -1,0 +1,80 @@
+---
+title: 'Production Concerns'
+description: 'The cross-cutting machinery that turns a working gRPC service into a production one — interceptors, security, metadata, load balancing, and health checking.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## From "it works" to "it ships"
+
+You can define a service, generate stubs, implement a handler, and call it — and it works on your laptop. Production asks harder questions: How do you log and authenticate *every* call without editing every handler? How do you encrypt traffic and prove who the caller is? How do you spread load across many backends when gRPC deliberately holds one long-lived connection? This module answers those.
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| Interceptors | The middleware model — wrap every call for logging, auth, metrics, retries |
+| Security & Auth | TLS and mTLS for the channel, token auth per call, and why they're separate |
+| Metadata | Key/value headers and trailers — auth tokens, trace ids, request ids |
+| Load balancing & health | Why L4 balancers break gRPC, client-side LB, and health checking |
+
+## The theme: cross-cutting concerns
+
+Everything here is a **cross-cutting concern** — something every RPC needs but no single handler should own.
+
+<Mermaid title="Cross-cutting concerns wrap the business logic, not live inside it" code={crossCutDiagram} />
+
+export const crossCutDiagram = `flowchart LR
+  call["incoming call"] --> tls["TLS / auth"]
+  tls --> intc["interceptors\n(log, metrics)"]
+  intc --> md["metadata\n(trace id, token)"]
+  md --> handler["your handler\n(business logic)"]
+  handler --> lb["load balancing\nspreads calls across backends"]`;
+
+gRPC gives you first-class hooks for each so your handlers stay focused on business logic. Learn these and your service becomes observable, secure, and scalable without rewriting the code that does the actual work.
+
+<Callout title="Why this module matters">
+The difference between a demo and a service is almost entirely cross-cutting: **security, observability, and scale**. gRPC bakes hooks for all three into the framework — interceptors, credentials, metadata, and load-balancing policies — so you configure them once instead of scattering them through every method.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What do all the topics in this module have in common?',
+    options: [
+      'They change the .proto schema',
+      'They are cross-cutting concerns — needed by every call, owned by no single handler',
+      'They only apply to streaming RPCs',
+      'They are database features',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why should logging and auth live in interceptors rather than each handler?',
+    options: [
+      'Handlers cannot access metadata',
+      'So handlers stay focused on business logic and the concern is applied once',
+      'Because gRPC forbids logging in handlers',
+      'To make the .proto smaller',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What makes load balancing uniquely tricky in gRPC?',
+    options: [
+      'gRPC has no clients',
+      'gRPC deliberately holds one long-lived multiplexed connection, which a naive L4 balancer pins to one backend',
+      'gRPC cannot use TLS',
+      'gRPC only runs on one machine',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="production/index" />

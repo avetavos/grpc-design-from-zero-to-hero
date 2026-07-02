@@ -1,0 +1,140 @@
+---
+title: 'Security & Auth'
+description: 'สองชั้นที่แยกกัน — TLS/mTLS เพื่อ secure และระบุตัวตน channel และ token credentials เพื่อ authenticate แต่ละ call — และทำไมต้องมีทั้งคู่'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## สองคำถาม สองชั้น
+
+security ใน gRPC ตอบคำถามที่ต่างกันสองข้อ และสำคัญมากที่จะไม่รวมมันเข้าด้วยกัน:
+
+- **connection เป็นส่วนตัวไหม และ *server* เป็นตัวที่มันอ้างจริงหรือเปล่า?** → **transport security** (TLS)
+- **ใครเป็นคน *เรียก* และเขาได้รับอนุญาตให้เรียก call นี้ไหม?** → **call authentication** (token ปกติอยู่ใน metadata)
+
+gRPC จัดการสองอย่างนี้เป็น credentials สองชนิด: **channel credentials** (ชั้น transport) และ **call credentials** (auth ต่อ RPC) เกือบทุกครั้งคุณต้องการทั้งคู่
+
+<Mermaid title="transport security และ call auth เป็นชั้นที่แยกกัน" code={layersDiagram} />
+
+export const layersDiagram = `flowchart TB
+  subgraph transport["Channel credentials — TLS"]
+    t["เข้ารหัส connection\n+ ยืนยันตัวตน server\n(mTLS ยืนยัน client ด้วย)"]
+  end
+  subgraph call["Call credentials — ต่อ RPC"]
+    c["แนบ token ใน metadata\nระบุตัวคนเรียก\nตรวจโดย server interceptor"]
+  end
+  transport --> call`;
+
+## TLS: เข้ารหัสและระบุตัวตน channel
+
+โดย default channel แบบ plaintext (`insecure`) โอเคสำหรับ demo บนเครื่อง แต่รับไม่ได้บน production **TLS** เข้ารหัส connection และให้ client ยืนยัน certificate ของ server ได้ ทำให้ไม่มีใครดักฟังหรือปลอมเป็น server ได้
+
+**mTLS** (mutual TLS) ไปอีกขั้น: *server* ก็ยืนยัน certificate ของ *client* ด้วย นี่คือ pattern ที่พบบ่อยสำหรับ auth แบบ service-to-service ภายใน mesh — ทั้งสองฝั่งพิสูจน์ตัวตนด้วย certificate และไม่ต้องใช้ bearer token สำหรับ machine identity
+
+## call credentials: ใครเป็นคนเรียก
+
+TLS พิสูจน์ตัวตนของ *server* และของเครื่อง แต่บ่อยครั้งคุณต้องการตัวตนของ *ผู้ใช้* ด้วย — bearer token (JWT, OAuth) ที่ส่งต่อ call gRPC แนบมันเป็น **call credentials**: client ใส่ token `authorization` ใน metadata ของทุก RPC แล้ว server interceptor ตรวจสอบและ reject ตัวที่ไม่ถูกต้องด้วย `UNAUTHENTICATED`
+
+call credentials เป็นแบบ **ต่อ RPC** ดังนั้น call ต่าง ๆ บน channel เดียวกันสามารถถือ token คนละตัวได้ (เช่น channel เดียว ผู้ใช้ปลายทางหลายคน)
+
+## เอามารวมกัน
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    // Channel credentials: TLS. Call credentials: a token on every RPC.
+    creds := credentials.NewClientTLSFromCert(certPool, "")
+    perRPC := oauth.TokenSource{TokenSource: myTokenSource}
+
+    conn, _ := grpc.NewClient(
+        "api.example.com:443",
+        grpc.WithTransportCredentials(creds),      // TLS
+        grpc.WithPerRPCCredentials(perRPC),         // token per call
+    )
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    # Channel credentials: TLS. Call credentials: a token per RPC.
+    channel_creds = grpc.ssl_channel_credentials(root_certificates=root_certs)
+    call_creds = grpc.access_token_call_credentials(access_token)
+    composite = grpc.composite_channel_credentials(channel_creds, call_creds)
+
+    channel = grpc.secure_channel("api.example.com:443", composite)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // TLS channel credentials + a per-call metadata token.
+    const ssl = credentials.createSsl(rootCert);
+    const callCreds = credentials.createFromMetadataGenerator((_, cb) => {
+      const md = new Metadata();
+      md.set('authorization', `Bearer ${token}`);
+      cb(null, md);
+    });
+    const combined = credentials.combineChannelCredentials(ssl, callCreds);
+    const client = new ApiClient('api.example.com:443', combined);
+    ```
+  </TabItem>
+</Tabs>
+
+## ความผิดพลาดที่ต้องเลี่ยง
+
+**อย่าส่ง bearer token ผ่าน channel ที่ insecure เด็ดขาด** gRPC บังคับเรื่องนี้: call credentials จะไม่ยอมแนบกับ connection แบบ plaintext เพราะ token ที่ส่งแบบ cleartext คือ token ที่ใครก็ตามบนเส้นทางขโมยได้ call credentials ต้องมี channel credentials (TLS) อยู่ข้างล่าง — framework กำลังปกป้องคุณจากบั๊ก security ที่พบบ่อยที่สุดของ gRPC
+
+<Callout title="สรุปหนึ่งบรรทัด">
+gRPC แบ่ง security เป็นสองชั้น: **channel credentials (TLS/mTLS)** ทำให้ connection ปลอดภัยและระบุตัวตน และ **call credentials** authenticate แต่ละ RPC ด้วย token ใน metadata ใช้ทั้งคู่ — และจำไว้ว่า gRPC ปฏิเสธที่จะส่ง call credentials ผ่าน channel ที่ insecure ดังนั้น token จะวิ่งบน TLS เสมอ
+</Callout>
+
+export const quizSec = [
+  {
+    q: 'channel credentials (TLS) ตอบคำถามอะไร?',
+    options: [
+      'จะ query database ไหน',
+      'connection เป็นส่วนตัวไหม และ server เป็นตัวที่มันอ้างจริงไหม',
+      'ให้ retry ได้กี่ครั้ง',
+      'จะเรียก method ไหน',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'mTLS เพิ่มอะไรจาก TLS ธรรมดา?',
+    options: [
+      'เข้ารหัสเร็วขึ้น',
+      'server ยืนยัน certificate ของ client ด้วย — ตัวตนแบบ mutual',
+      'retry อัตโนมัติ',
+      'รองรับ JSON',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม call credentials ถึงเรียกว่าแบบต่อ RPC?',
+    options: [
+      'ตั้งได้ครั้งเดียวต่อ process',
+      'call ต่าง ๆ บน channel เดียวกันถือ token คนละตัวได้',
+      'มันแทน TLS',
+      'ส่งเฉพาะ call แรกเท่านั้น',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม gRPC ถึงปฏิเสธที่จะแนบ call credentials กับ channel ที่ insecure?',
+    options: [
+      'เพื่อบังคับให้ทุกคนใช้ HTTP/1.1',
+      'token ที่ส่งแบบ cleartext อาจถูกใครก็ตามบนเส้นทางขโมยได้ — จึงต้องมี TLS อยู่ข้างล่าง',
+      'เพราะ token ใหญ่เกินไปสำหรับ plaintext',
+      'เพราะ channel แบบ insecure เร็วกว่า',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/security-and-auth" questions={quizSec} />
+
+<ProgressTracker client:visible id="production/security-and-auth" />

@@ -1,0 +1,202 @@
+---
+title: 'Client Streaming'
+description: 'A stream of requests, one response — the shape for uploads, batching, and metric ingestion, with the send and receive loops in three languages.'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Many requests in, one response out
+
+**Client streaming** flips server streaming around: the client sends a *sequence* of messages over one open stream, and the server replies with a single response — but only after the client signals it is finished.
+
+It is the natural fit for feeding data *into* a service: uploading a file in chunks, ingesting a batch of metrics, or sending many records that the server folds into one summary.
+
+<Mermaid title="Client streaming: a stream of requests, one response" code={csDiagram} />
+
+export const csDiagram = `sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: Sample 1
+  C->>S: Sample 2
+  C->>S: Sample 3
+  C->>S: (half-close: done sending)
+  S-->>C: UploadSummary(count: 3, accepted: 3)
+  Note over C,S: server responds once, after the client finishes`;
+
+## The contract
+
+Here the `stream` keyword goes on the **request**. The response stays singular:
+
+```proto
+syntax = "proto3";
+package metrics.v1;
+
+message Sample {
+  string name  = 1;
+  double value = 2;
+}
+
+message UploadSummary {
+  int32 count    = 1;
+  int32 accepted = 2;
+}
+
+service Ingest {
+  // A stream of Samples, one UploadSummary response.
+  rpc UploadSamples(stream Sample) returns (UploadSummary);
+}
+```
+
+## Client: send in a loop, then close
+
+The client sends each message, then performs a **half-close** — it tells the server "I'm done sending" — and waits for the single response.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    stream, _ := client.UploadSamples(ctx)
+    for _, s := range samples {
+        if err := stream.Send(s); err != nil {
+            log.Fatal(err)
+        }
+    }
+    summary, err := stream.CloseAndRecv() // half-close, then get the reply
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(summary.Accepted)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def sample_iter():
+        for s in samples:
+            yield metrics_pb2.Sample(name=s.name, value=s.value)
+
+    summary = client.UploadSamples(sample_iter())  # returns after the iterator is exhausted
+    print(summary.accepted)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const call = client.uploadSamples((err, summary: UploadSummary) => {
+      if (err) throw err;
+      console.log(summary.accepted);
+    });
+    for (const s of samples) call.write(s);
+    call.end(); // half-close: done sending, now wait for the response
+    ```
+  </TabItem>
+</Tabs>
+
+## Server: fold the stream into one answer
+
+The server reads every message, accumulates state, and returns a single response once the client half-closes.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func (s *server) UploadSamples(stream metricsv1.Ingest_UploadSamplesServer) error {
+        var count, accepted int32
+        for {
+            sample, err := stream.Recv()
+            if err == io.EOF {
+                // client is done — send the single response
+                return stream.SendAndClose(&metricsv1.UploadSummary{Count: count, Accepted: accepted})
+            }
+            if err != nil {
+                return err
+            }
+            count++
+            if sample.Value >= 0 {
+                accepted++
+            }
+        }
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def UploadSamples(self, request_iterator, context):
+        count = accepted = 0
+        for sample in request_iterator:
+            count += 1
+            if sample.value >= 0:
+                accepted += 1
+        return metrics_pb2.UploadSummary(count=count, accepted=accepted)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    function uploadSamples(call: ServerReadableStream<Sample, UploadSummary>, cb) {
+      let count = 0, accepted = 0;
+      call.on('data', (s: Sample) => { count++; if (s.value >= 0) accepted++; });
+      call.on('end', () => cb(null, { count, accepted }));
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+## Design notes
+
+- **The response comes only after the half-close.** The client cannot expect a reply mid-stream; the single response is the signal that the whole upload was processed.
+- **Bound the total.** A client can stream forever; the server should cap how much it will accept (message count or size) to avoid unbounded memory or work.
+- **Order is preserved**, so the server can rely on receiving samples in send order.
+- **Either side can end early with an error.** If the server rejects the batch partway (e.g. quota exceeded), it can return an error status instead of the summary — the client's `CloseAndRecv` surfaces it.
+
+<Callout title="The one-line takeaway">
+Client streaming is a `stream` of requests and one response: the client sends in a loop, half-closes, and gets a single reply the server produces from the whole batch. Use it for uploads, batching, and ingestion — and always cap how much the server will accept.
+</Callout>
+
+export const quizCS = [
+  {
+    q: 'In client streaming, when does the server send its single response?',
+    options: [
+      'After the very first request message',
+      'After the client half-closes (signals it is done sending)',
+      'Every 10 messages',
+      'Never — there is no response',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Where does the `stream` keyword go for client streaming?',
+    options: [
+      'On the response type',
+      'On the request type',
+      'On both',
+      'On neither — it is inferred',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why should the server cap how much a client-streaming call accepts?',
+    options: [
+      'Protobuf requires a maximum',
+      'An unbounded stream can exhaust the server’s memory or work budget',
+      'HTTP/2 forbids more than 100 messages',
+      'To keep the response human-readable',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the "half-close" in a client-streaming call?',
+    options: [
+      'Closing the TCP socket entirely',
+      'The client signalling it is done sending, while still waiting to receive the response',
+      'Dropping every other message',
+      'Switching the call to server streaming',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/client-streaming" questions={quizCS} />
+
+<ProgressTracker client:visible id="streaming/client-streaming" />

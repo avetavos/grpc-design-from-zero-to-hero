@@ -1,0 +1,155 @@
+---
+title: 'Interceptors'
+description: 'The gRPC middleware model — wrapping every call for logging, auth, metrics, and retries, for both unary and streaming RPCs.'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Middleware for RPC
+
+An **interceptor** is gRPC's version of middleware: a function that wraps a call so you can run code *before* and *after* the actual handler. If you have used HTTP middleware, this is the same idea, applied to RPCs instead of routes.
+
+The point is to keep cross-cutting logic — logging, authentication, metrics, tracing, retries — out of your business handlers. You write the concern once as an interceptor and it applies to every method automatically.
+
+## The chain wraps the handler
+
+Interceptors compose into a **chain**. Each one gets the call, does its work, and calls the next link — until the innermost link is your handler. On the way back out, each interceptor can inspect the response or error.
+
+<Mermaid title="An interceptor chain wrapping the handler" code={chainDiagram} />
+
+export const chainDiagram = `flowchart LR
+  call["incoming call"] --> log["logging\ninterceptor"]
+  log --> auth["auth\ninterceptor"]
+  auth --> metrics["metrics\ninterceptor"]
+  metrics --> handler["your handler"]
+  handler -->|response / error| metrics
+  metrics --> auth
+  auth --> log
+  log -->|response| call`;
+
+The order matters: put logging outermost so it records everything, auth next so unauthenticated calls are rejected before they reach expensive work, and metrics close to the handler so timings reflect real work.
+
+## Two flavors: unary and streaming
+
+Because gRPC has unary and streaming calls, it has **two** interceptor types:
+
+- A **unary interceptor** wraps a single request/response call. It sees the request, calls the handler, and sees the response — one shot.
+- A **stream interceptor** wraps a streaming call. It doesn't see individual messages by default; it wraps the *stream object*, so to observe each message you wrap the stream's send/receive methods.
+
+That asymmetry trips people up: a logging interceptor written for unary calls won't automatically log every streamed message — you have to wrap the stream.
+
+## A minimal logging interceptor
+
+Here is server-side logging that records the method and elapsed time for every unary call.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func loggingUnary(
+        ctx context.Context, req any, info *grpc.UnaryServerInfo,
+        handler grpc.UnaryHandler,
+    ) (any, error) {
+        start := time.Now()
+        resp, err := handler(ctx, req) // call the next link (eventually your handler)
+        log.Printf("method=%s took=%s err=%v", info.FullMethod, time.Since(start), err)
+        return resp, err
+    }
+
+    server := grpc.NewServer(grpc.ChainUnaryInterceptor(loggingUnary))
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    class LoggingInterceptor(grpc.ServerInterceptor):
+        def intercept_service(self, continuation, handler_call_details):
+            method = handler_call_details.method
+            start = time.time()
+            handler = continuation(handler_call_details)  # the next link
+            logging.info("method=%s registered", method)
+            return handler  # wrap handler.unary_unary to time each call in practice
+
+    server = grpc.server(executor, interceptors=[LoggingInterceptor()])
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // @grpc/grpc-js exposes interceptors on the client; on the server,
+    // wrap handlers or use a middleware library such as nice-grpc.
+    const loggingUnary: ServerMiddleware = async function* (call, ctx) {
+      const start = Date.now();
+      try {
+        return yield* call.next(call.request, ctx);
+      } finally {
+        console.log(`method=${ctx.path} took=${Date.now() - start}ms`);
+      }
+    };
+    ```
+  </TabItem>
+</Tabs>
+
+Interceptors run on both sides: **server interceptors** enforce auth and record metrics; **client interceptors** attach tokens, add trace ids, and implement retries with backoff. The same chain idea applies in both directions.
+
+## Common uses
+
+- **Logging & tracing** — one place to record method, latency, status, and a trace id.
+- **Auth** — validate a token from metadata and reject early with `UNAUTHENTICATED`.
+- **Metrics** — count calls and observe latency per method for dashboards.
+- **Retries** — a client interceptor can transparently retry idempotent calls on transient failures.
+- **Recovery** — catch a panic/exception in a handler and turn it into a clean `INTERNAL` status instead of crashing the connection.
+
+<Callout title="The one-line takeaway">
+Interceptors are gRPC middleware: a chain that wraps every call so logging, auth, metrics, and retries live in one place instead of in every handler. Remember there are two kinds — unary wraps a request/response, stream wraps the stream object — so logging a streaming call means wrapping its send/receive, not just the call.
+</Callout>
+
+export const quizIntc = [
+  {
+    q: 'What is an interceptor in gRPC?',
+    options: [
+      'A tool that edits the .proto at build time',
+      'Middleware that wraps a call to run code before and after the handler',
+      'A database trigger',
+      'A load balancing policy',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why put an auth interceptor before the handler in the chain?',
+    options: [
+      'It runs faster there',
+      'So unauthenticated calls are rejected before reaching expensive work',
+      'Handlers cannot read metadata',
+      'It is required by protobuf',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why does a unary logging interceptor not automatically log every streamed message?',
+    options: [
+      'Streaming calls have no interceptors',
+      'A stream interceptor wraps the stream object, not each message — you must wrap send/receive',
+      'Streamed messages are not real messages',
+      'Logging is disabled during streaming',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which task is a good fit for a client-side interceptor?',
+    options: [
+      'Storing rows in a database',
+      'Attaching an auth token and retrying idempotent calls on transient failures',
+      'Compiling the .proto',
+      'Rendering HTML',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/interceptors" questions={quizIntc} />
+
+<ProgressTracker client:visible id="production/interceptors" />

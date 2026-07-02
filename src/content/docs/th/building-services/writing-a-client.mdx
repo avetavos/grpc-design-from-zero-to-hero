@@ -1,0 +1,145 @@
+---
+title: 'Writing a Client'
+description: 'สร้าง channel, เอา stub, ยิง call แล้วจัดการ typed response กับ error — พร้อมเหตุผลว่าทำไมต้อง reuse channel เดียวสำหรับทุกอย่าง'
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## channel, stub, call
+
+gRPC client สร้างจาก object 2 ตัว:
+
+- **channel** — connection ที่อายุยาวไปยัง address ของ server (`host:port`) มันจัดการ HTTP/2 connection ข้างใต้, การ reconnect และ load balancing
+- **stub** — wrapper บาง ๆ ที่มี type สร้าง *จาก* channel เปิด method หนึ่งตัวต่อ `rpc` การเรียก `stub.GetUser(req)` จะส่ง request ผ่าน channel แล้วคืน response
+
+<Mermaid title="channel รับทุก call; stub คือหน้าตาที่มี type" code={clientDiagram} />
+
+export const clientDiagram = `flowchart LR
+  stub["stub.GetUser(req)"] --> channel["channel\n(host:port, HTTP/2)"]
+  stub2["stub.GetUser(req2)"] --> channel
+  channel -->|multiplexed| server["server :50051"]`;
+
+stub ทั้งสองตัวใช้ channel **เดียวกัน** — นั่นแหละคือประเด็น channel สร้างแพงแต่แชร์ถูก; ส่วน stub เป็นแค่ typed handle ที่วางทับอยู่ข้างบน
+
+## การยิง call
+
+นี่คือ client ครบชุดที่สร้าง channel, สร้าง stub, เรียก `GetUser` แล้วจัดการทั้ง response และ error ที่อาจเกิด:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, err := grpc.NewClient("localhost:50051",
+        grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close() // close the channel when the program ends, not per call
+
+    client := userv1.NewUserServiceClient(conn) // stub
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if err != nil {
+        st, _ := status.FromError(err) // inspect the gRPC status
+        log.Fatalf("call failed: %s — %s", st.Code(), st.Message())
+    }
+    fmt.Println(user.Name)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel("localhost:50051")
+    client = user_pb2_grpc.UserServiceStub(channel)  # stub
+
+    try:
+        user = client.GetUser(user_pb2.GetUserRequest(id=42))
+        print(user.name)
+    except grpc.RpcError as e:
+        print(f"call failed: {e.code()} — {e.details()}")  # inspect the status
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const channel = new UserServiceClient(
+      'localhost:50051',
+      credentials.createInsecure(),
+    ); // channel + stub in one
+
+    channel.getUser({ id: 42 }, (err, user) => {
+      if (err) {
+        console.error(`call failed: ${err.code} — ${err.details}`);
+        return;
+      }
+      console.log(user.name);
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+สังเกตว่า error ไม่ใช่ exception เรื่อง network — แต่เป็น **status** ที่มี code (`NOT_FOUND`, `DEADLINE_EXCEEDED`, `UNAVAILABLE`) และ message client จะ branch ตาม code นั้น
+
+## reuse channel — อย่าสร้างใหม่ต่อ call
+
+ความผิดพลาดของ client ที่พบบ่อยที่สุดคือสร้าง channel ใหม่ทุก request channel ต้องตั้ง HTTP/2 connection, name resolution และ state ของ load balancing — ทำแบบนั้นต่อ call คือทิ้งประสิทธิภาพที่ดีที่สุดของ gRPC และอาจทำให้ socket หมดตอน load สูง
+
+**สร้าง channel เดียวต่อ target ตอน startup แล้วแชร์** ให้ทุก call และทุก stub ปิดมันแค่ตอนโปรแกรม shutdown เท่านั้น
+
+## blocking vs async
+
+stub ที่ generate มามักให้ทั้งสองแบบ: call แบบ **blocking/synchronous** ที่คืน response (ง่ายสุดสำหรับ script และ request handler) และแบบ **async/future** ที่คืนทันทีแล้วเสร็จทีหลัง (มีประโยชน์สำหรับ fan-out หรือ server แบบ non-blocking) เลือกตามจุดเรียกใช้ ทั้งคู่วิ่งผ่าน channel เดียวกัน
+
+<Callout title="The one-line takeaway">
+client คือ **channel** (connection ที่อายุยาว) บวก **stub** (พื้นผิว method ที่มี type) สร้าง channel ครั้งเดียวตอน startup แล้วแชร์ทุกที่; การเรียก `stub.GetUser(req)` คืน typed response หรือ **status** error ที่คุณ branch ตามได้ อย่าสร้าง channel ต่อ call
+</Callout>
+
+export const quizClient = [
+  {
+    q: 'gRPC client สร้างจาก object 2 ตัวอะไร?',
+    options: [
+      'socket กับ buffer',
+      'channel (connection) กับ stub (method ที่มี type)',
+      'request กับ response',
+      'proxy กับ cache',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ความผิดพลาดของ client ที่พบบ่อยที่สุดคืออะไร?',
+    options: [
+      'reuse channel เดียวสำหรับทุก call',
+      'สร้าง channel ใหม่ทุก request',
+      'ตั้ง deadline',
+      'ใช้ protobuf',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เมื่อ call ล้มเหลว client ได้รับอะไรจริง ๆ?',
+    options: [
+      'network exception กว้าง ๆ ที่ไม่มีรายละเอียด',
+      'status ที่มี code (เช่น NOT_FOUND) และ message',
+      'หน้า HTML HTTP 500',
+      'stack trace จาก server',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ควรปิด channel เมื่อไร?',
+    options: [
+      'หลังทุก call',
+      'เมื่อโปรแกรม shutdown',
+      'ไม่ต้องปิดเลย',
+      'ก่อนทุก call',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/writing-a-client" questions={quizClient} />
+
+<ProgressTracker client:visible id="building-services/writing-a-client" />

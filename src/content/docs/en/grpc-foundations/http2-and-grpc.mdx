@@ -1,0 +1,111 @@
+---
+title: 'HTTP/2 & gRPC'
+description: 'Why gRPC needs HTTP/2 — multiplexing over one connection, streams, binary framing, and header compression — and what that buys you.'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## gRPC is HTTP/2 all the way down
+
+gRPC does not invent its own transport. Every gRPC call is an **HTTP/2 request** — the method name is a path, the message is the body, and metadata are headers. gRPC is a *convention on top of HTTP/2*, which is why it inherits HTTP/2's most important property: **multiplexing**.
+
+Understanding four HTTP/2 features explains almost everything about how gRPC behaves.
+
+## 1. Multiplexing: many calls, one connection
+
+Under HTTP/1.1, one connection handles one request at a time. Fire ten requests and they either queue on one connection (head-of-line blocking) or you open ten connections.
+
+HTTP/2 splits a single connection into many independent **streams**. Each gRPC call is one stream. Dozens of calls fly over the same TCP connection concurrently, none blocking the others.
+
+<Mermaid title="HTTP/1.1 head-of-line blocking vs HTTP/2 multiplexed streams" code={muxDiagram} />
+
+export const muxDiagram = `flowchart TB
+  subgraph h1["HTTP/1.1 — one at a time"]
+    direction LR
+    a["req A"] --> b["req B waits"] --> c["req C waits"]
+  end
+  subgraph h2["HTTP/2 — multiplexed streams"]
+    direction LR
+    conn["one connection"] --> sA["stream 1: call A"]
+    conn --> sB["stream 3: call B"]
+    conn --> sC["stream 5: call C"]
+  end`;
+
+This is why a gRPC client keeps a single long-lived **channel** to a server and reuses it for everything — opening connections per call would throw away the biggest win.
+
+## 2. Streams are bidirectional
+
+An HTTP/2 stream can carry a sequence of messages in **both** directions, not just one request and one response. gRPC exposes this directly as its four call types (unary, server-streaming, client-streaming, bidirectional) — all of which are just different usage patterns of one HTTP/2 stream. Streaming isn't bolted on; it's the native shape of the transport.
+
+## 3. Binary framing
+
+HTTP/1.1 is a text protocol. HTTP/2 breaks communication into binary **frames** (HEADERS frames, DATA frames). gRPC puts protobuf messages inside DATA frames with a tiny 5-byte prefix (a compression flag and a length). Everything on the wire is binary and length-delimited — fast to parse, and the framing is what lets the receiver know where one message ends and the next begins in a stream.
+
+## 4. Header compression (HPACK)
+
+gRPC sends metadata — auth tokens, trace IDs, content types — as HTTP/2 headers on every call. HTTP/2's **HPACK** compresses headers and remembers ones already sent, so repeated metadata (the same `authorization` header on every call) costs almost nothing after the first send.
+
+## What this means for your design
+
+Because gRPC rides on HTTP/2, several design habits follow directly:
+
+- **Reuse channels.** One channel per target, shared across calls — creating a channel per request wastes the multiplexing.
+- **A single slow call won't block others** on the same connection — but a single connection does have limits (max concurrent streams), which is why load balancing at L7 matters (a later lesson).
+- **Streaming is cheap** because it's the transport's native mode, not an emulation.
+- **You need real HTTP/2 end to end.** Proxies and load balancers must speak HTTP/2, or they'll break gRPC — a very common first-deploy surprise.
+
+<Callout title="The one-line takeaway">
+gRPC is a thin convention over HTTP/2: methods are paths, messages are binary DATA frames, metadata are HPACK-compressed headers, and every call is a multiplexed stream. That's why one channel carries many concurrent calls, why streaming is native, and why every hop in your infrastructure must speak HTTP/2.
+</Callout>
+
+export const quizHttp2 = [
+  {
+    q: 'What HTTP/2 feature lets many gRPC calls share one connection without blocking each other?',
+    options: [
+      'Header compression',
+      'Multiplexed streams',
+      'TLS',
+      'Chunked transfer encoding',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why does a gRPC client keep one long-lived channel and reuse it?',
+    options: [
+      'To avoid re-authenticating',
+      'Because multiplexing means one connection can carry all concurrent calls efficiently',
+      'Because HTTP/2 forbids multiple connections',
+      'To keep the JSON cache warm',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How does gRPC put a protobuf message on the wire?',
+    options: [
+      'As pretty-printed text',
+      'Inside a binary HTTP/2 DATA frame with a 5-byte length/compression prefix',
+      'As a URL query string',
+      'As a multipart form',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is a common first-deploy problem caused by gRPC needing HTTP/2?',
+    options: [
+      'Databases reject binary data',
+      'A proxy or load balancer that only speaks HTTP/1.1 breaks the connection',
+      'Browsers cache responses forever',
+      'Protobuf files get too large',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/http2-and-grpc" questions={quizHttp2} />
+
+<ProgressTracker client:visible id="grpc-foundations/http2-and-grpc" />

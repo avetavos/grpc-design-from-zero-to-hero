@@ -1,0 +1,125 @@
+---
+title: 'Repeated, Maps & Well-Known'
+description: 'Lists with repeated, key/value maps, and the google.protobuf standard library — Timestamp, Duration, Any, wrappers, Empty, and FieldMask.'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Repeated fields are lists
+
+Add `repeated` to a field and it becomes an ordered list of that type — zero or more values:
+
+```proto
+message Playlist {
+  string          name  = 1;
+  repeated string songs = 2;   // 0..N strings
+  repeated Track  tracks = 3;  // 0..N messages
+}
+```
+
+Repeated fields preserve order, and an empty list is just the default — you never send "null vs empty," they're the same. For numeric scalar lists, protobuf uses **packed encoding** by default in proto3, storing the values back-to-back without a tag per element, which keeps large numeric arrays compact.
+
+## Maps are key/value pairs
+
+A **map** is syntactic sugar for a repeated key/value entry, giving you an associative container:
+
+```proto
+message Config {
+  map<string, string> labels   = 1;
+  map<int64, User>    user_by_id = 2;
+}
+```
+
+Keys can be any integer, bool, or string type; values can be any type except another map. Two caveats worth knowing: map ordering is **not** guaranteed on the wire, and maps can't be `repeated` (wrap them in a message if you need a list of maps).
+
+## Well-known types: protobuf's standard library
+
+You don't model time, duration, or "any value" from scratch. The `google.protobuf` package ships **well-known types** — import and use them.
+
+<Mermaid title="The well-known types you'll actually reach for" code={wktDiagram} />
+
+export const wktDiagram = `flowchart LR
+  time["Timestamp / Duration\n→ points in time & spans"]
+  wrap["Int32Value, StringValue…\n→ nullable scalars"]
+  any["Any / Struct\n→ dynamic / unknown shapes"]
+  util["Empty / FieldMask\n→ no-arg calls & partial updates"]`;
+
+The ones you'll use constantly:
+
+- **`Timestamp`** and **`Duration`** — a precise point in time and a span. Always prefer these over a raw `int64` of "milliseconds since something."
+- **Wrappers** (`Int32Value`, `StringValue`, `BoolValue`, …) — a message-typed box around a scalar, which gives you nullability. An older alternative to the `optional` keyword; still common in existing APIs.
+- **`Any`** — carries an arbitrary serialized message plus its type URL, for genuinely dynamic payloads. Powerful but it defeats static typing, so use it sparingly.
+- **`Struct`** — arbitrary JSON-like data (objects, lists, values) when a shape truly isn't known ahead of time.
+- **`Empty`** — a message with no fields, for RPCs that take or return nothing.
+- **`FieldMask`** — a list of field paths, the standard way to express "update only these fields" in a partial-update API.
+
+```proto
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/field_mask.proto";
+
+message Event {
+  string                    name       = 1;
+  google.protobuf.Timestamp created_at = 2;
+}
+
+message UpdateUserRequest {
+  User                        user       = 1;
+  google.protobuf.FieldMask   update_mask = 2;  // which fields to change
+}
+```
+
+<Callout title="The one-line takeaway">
+`repeated` gives you ordered lists (empty = absent, and numeric lists pack tightly); `map<k,v>` gives you key/value pairs (unordered on the wire, values can't be maps). And don't reinvent common shapes — reach into `google.protobuf` for `Timestamp`, `Duration`, wrappers, `Any`, `Empty`, and `FieldMask` for partial updates.
+</Callout>
+
+export const quizRepeated = [
+  {
+    q: 'What does adding `repeated` to a field do?',
+    options: [
+      'Makes the field required',
+      'Turns it into an ordered list of zero or more values',
+      'Encrypts each value',
+      'Forces it to be sent twice',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which is true about protobuf maps?',
+    options: [
+      'Their wire ordering is guaranteed',
+      'Their ordering is not guaranteed and a map value cannot itself be a map',
+      'Keys must always be strings',
+      'They are faster than repeated fields in all cases',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How should you represent a point in time in a message?',
+    options: [
+      'A raw int64 of milliseconds with a comment',
+      'google.protobuf.Timestamp',
+      'A formatted string',
+      'A repeated int32',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is `google.protobuf.FieldMask` used for?',
+    options: [
+      'Encrypting fields',
+      'Expressing which fields to change in a partial update',
+      'Compressing repeated fields',
+      'Declaring required fields',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/repeated-maps-wellknown" questions={quizRepeated} />
+
+<ProgressTracker client:visible id="protocol-buffers/repeated-maps-wellknown" />

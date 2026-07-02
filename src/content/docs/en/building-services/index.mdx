@@ -1,0 +1,98 @@
+---
+title: 'Building Services'
+description: 'From a .proto to running code — generate stubs, implement a server, write a client, and control every call with deadlines and cancellation.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## From contract to running code
+
+You have a `.proto` contract. This module turns it into something that actually runs: a server that answers calls, a client that makes them, and the deadline discipline that keeps the whole thing from hanging forever.
+
+Every lesson uses the same tiny contract so you can follow one example end to end:
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message GetUserRequest {
+  int64 id = 1;
+}
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+}
+```
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| Code Generation | `protoc`, language plugins, `buf`, and exactly what gets generated |
+| Implementing a Server | Filling in the handler, registering the service, and serving |
+| Writing a Client | Channels, stubs, making the call, and reusing connections |
+| Deadlines & Cancellation | Why every call needs a deadline, and how it propagates |
+
+## The shape of the work
+
+<Mermaid title="The build loop: generate, implement, call" code={buildDiagram} />
+
+export const buildDiagram = `flowchart LR
+  proto[".proto"] -->|protoc / buf| gen["generated code:\nmessages + stub + server interface"]
+  gen --> srv["implement server\n(fill GetUser)"]
+  gen --> cli["write client\n(call GetUser)"]
+  cli -->|HTTP/2| srv`;
+
+Notice that the generated code sits in the middle: it hands the **server** an interface to implement and the **client** a stub to call. You write the two ends; codegen guarantees they agree.
+
+<Callout title="The one-line takeaway">
+Building a gRPC service is three moves: generate typed code from the `.proto`, implement the server handler, and call it from a client stub — then wrap every call in a deadline so nothing hangs forever.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What does the code generated from a .proto give you?',
+    options: [
+      'Only a client',
+      'Message types plus a client stub and a server interface',
+      'A database schema',
+      'An HTML form',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why does every lesson in this module reuse the same UserService contract?',
+    options: [
+      'Because gRPC only supports one service per program',
+      'So you can follow one example end to end, from schema to server to client',
+      'Because protoc requires it',
+      'To save network bandwidth',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which discipline keeps a gRPC call from hanging forever?',
+    options: [
+      'Setting a deadline on every call',
+      'Using JSON instead of protobuf',
+      'Opening a new channel per call',
+      'Disabling TLS',
+    ],
+    answer: 0,
+  },
+];
+
+<Quiz client:visible id="building-services/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="building-services/index" />

@@ -1,0 +1,123 @@
+---
+title: 'Versioning & Evolution'
+description: 'ใส่ version ใน package, แยก additive change ออกจาก breaking change, รันหลาย version พร้อมกัน และให้ buf จับ breakage ก่อน ship'
+sidebar:
+  order: 4
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## API ของคุณจะอยู่นานกว่ารูปแบบแรก
+
+โมดูล protobuf แสดงให้เห็นว่า wire format ทน*การเปลี่ยนแปลง*ได้*อย่างไร* — field number ไม่ใช่ name เป็นตัวระบุข้อมูล บทเรียนนี้พูดถึง**วินัย**ที่เปลี่ยนความทนระดับล่างนั้นให้กลายเป็น versioning strategy จริงที่ caller พึ่งพาได้
+
+กฎทอง: **client เก่ากับ server ใหม่ต้องยังทำงานได้ และ client ใหม่กับ server เก่าต้องยังทำงานได้** ทุกอย่างข้างล่างนี้เพื่อเป้าหมายนั้น
+
+## version อยู่ใน package
+
+convention คือใส่ major version ไว้ใน protobuf **package** (และใน path ของไฟล์):
+
+```proto
+package user.v1;   // user/v1/user.proto
+```
+
+เมื่อต้องเปลี่ยนแบบ incompatible คุณไม่แก้ `v1` แต่สร้าง `user.v2` ขึ้นมาคู่กัน code ที่ generate ลงคนละ namespace ทำให้ `v1` กับ `v2` รันใน server เดียวกันพร้อมกันได้ และ caller ค่อย migrate ตามตารางของตัวเอง
+
+## additive vs breaking
+
+การเปลี่ยนส่วนใหญ่ควรเป็นแบบ **additive** — ปลอดภัยเพราะ wire format ไม่สนสิ่งที่มันไม่รู้จัก:
+
+| ปลอดภัย (additive) | breaking (ต้องขึ้น version ใหม่) |
+|-----------------|-------------------------------|
+| เพิ่ม field ใหม่ด้วย number ใหม่ | เปลี่ยน number ของ field |
+| เพิ่ม method ใหม่เข้า service | เปลี่ยน type ของ field |
+| เพิ่ม enum value ใหม่ (ปกติ) | rename/reuse number ของ field ที่ลบไปแล้ว |
+| เพิ่ม message ใหม่ | ลบ field ที่ยังใช้อยู่ |
+| | rename package, service หรือ method |
+
+<Mermaid title="additive change อยู่ใน v1 ต่อไป ส่วน incompatible change ได้ v2" code={evoDiagram} />
+
+export const evoDiagram = `flowchart TB
+  v1["user.v1"] -->|add field #7,\nadd method| v1b["user.v1\n(still compatible)"]
+  v1 -->|change field type,\nremove field| v2["user.v2\n(new package,\nruns alongside v1)"]
+  client1["old client"] --> v1b
+  client2["new client"] --> v2`;
+
+## reserve สิ่งที่เลิกใช้
+
+เมื่อคุณ*ลบ* field จริง ๆ อย่าให้ number (หรือ name) ของมันถูก reuse — field ในอนาคตที่ใช้ number เดิมจะอ่านข้อมูลเก่าผิดแบบเงียบ ๆ ให้ mark เป็น reserved:
+
+```proto
+message User {
+  reserved 4, 7;
+  reserved "phone_number";
+  int64 id = 1;
+  string name = 2;
+}
+```
+
+นี่คือ guardrail ระดับ schema ที่อยู่เบื้องหลังกฎ field number: compiler จะปฏิเสธการเอา `4`, `7` หรือ `phone_number` ไปใช้ซ้ำ
+
+## ให้เครื่องมือบังคับใช้
+
+คนพลาดการมองเห็น breaking change ตอน review **`buf breaking`** เทียบ `.proto` ของคุณกับ baseline (version ที่ release ล่าสุด, git ref หรือ registry) แล้วทำให้ CI fail ถ้า change ไหนจะทำลาย wire หรือ generated code:
+
+```bash
+buf breaking --against '.git#branch=main'
+```
+
+การต่อสิ่งนี้เข้า CI เปลี่ยน "ช่วยจำกฎ compatibility ทั้งหมดด้วยนะ" ให้กลายเป็นด่านอัตโนมัติ — นิสัยที่ให้ leverage สูงสุดสำหรับ schema ที่หลายทีมพึ่งพา
+
+<Callout title="สรุปหนึ่งบรรทัด">
+ใส่ major version ใน package (`user.v1`), ทำให้ change เป็น additive เพื่อให้ client เก่าและใหม่ทำงานร่วมกันได้ และเปิด `user.v2` คู่กับ `v1` เฉพาะตอนที่ breaking จริง ๆ reserve number ของ field ที่เลิกใช้ไม่ให้ reuse และรัน `buf breaking` ใน CI เพื่อให้เครื่อง — ไม่ใช่ความจำของ reviewer — จับ incompatibility
+</Callout>
+
+export const quizVer = [
+  {
+    q: 'convention ใส่ major version ของ API ไว้ที่ไหน?',
+    options: [
+      'ใน HTTP header',
+      'ในชื่อ protobuf package (เช่น user.v1)',
+      'ใน field number',
+      'ใน TLS certificate',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'change ไหนปลอดภัย (additive) และไม่ต้องขึ้น version ใหม่?',
+    options: [
+      'เปลี่ยน number ของ field',
+      'เพิ่ม field ใหม่ด้วย number ใหม่',
+      'ลบ field ที่ยังใช้อยู่',
+      'rename service',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมต้อง reserve number ของ field ที่ลบไปแล้ว?',
+    options: [
+      'เพื่อให้ message เล็กลง',
+      'เพื่อให้ number นั้นถูก reuse ไม่ได้ และไม่อ่านข้อมูลเก่าผิดแบบเงียบ ๆ',
+      'เพื่อเร่งการ decode',
+      'มันมีไว้แค่เป็น documentation',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'การรัน `buf breaking` ใน CI ได้อะไร?',
+    options: [
+      'มัน format ไฟล์ `.proto` ให้',
+      'มันทำให้ build fail อัตโนมัติเมื่อ change จะทำลาย wire หรือ generated-code compatibility',
+      'มัน deploy version ใหม่',
+      'มัน generate client stub',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="ecosystem-advanced/versioning-and-evolution" questions={quizVer} />
+
+<ProgressTracker client:visible id="ecosystem-advanced/versioning-and-evolution" />

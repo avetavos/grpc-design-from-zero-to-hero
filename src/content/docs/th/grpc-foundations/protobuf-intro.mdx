@@ -1,0 +1,120 @@
+---
+title: 'Protocol Buffers Intro'
+description: 'แนวคิด contract-first, ทำไม binary schema ดีกว่า JSON แบบตามใจ และ field number ทำให้ protobuf กระชับและ evolve ได้อย่างไร'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## protobuf คือ contract
+
+**Protocol Buffers** (protobuf) คือภาษาที่คุณใช้อธิบายข้อมูลและ service ของคุณ และเป็น format ที่ข้อมูลนั้นเดินทางไปด้วย มันเล่น 2 บทบาทพร้อมกัน:
+
+- **ภาษา schema** — ไฟล์ `.proto` ที่ประกาศ message และ service ของคุณในแบบที่ภาษาใดก็ compile ได้
+- **wire format** — binary encoding ที่กระชับ ซึ่ง message เหล่านั้นใช้ตอนวิ่งข้าม network
+
+ใน gRPC protobuf *คือ* contract ทุกอย่าง — type safety, codegen, ประสิทธิภาพ — ไหลมาจากมัน
+
+## message คือ field ที่มีหมายเลข
+
+นี่คือ message ที่เล็กที่สุดแต่ยังน่าสนใจ:
+
+```proto
+syntax = "proto3";
+
+message User {
+  int64  id    = 1;
+  string name  = 2;
+  string email = 3;
+}
+```
+
+`= 1`, `= 2`, `= 3` คือ **field number** และมันคือแนวคิดที่สำคัญที่สุดใน protobuf บน wire protobuf **ไม่** ส่งชื่อ field มันส่ง *หมายเลข* ของ field กับค่า ดังนั้น `name = "Ada"` จึงกลายเป็นประมาณว่า "field 2, string, Ada" — tag ไม่กี่ byte บวกกับค่า
+
+<Mermaid title="JSON ส่งชื่อทุกครั้ง; protobuf ส่ง tag ที่เป็นหมายเลขเล็ก ๆ" code={encodeDiagram} />
+
+export const encodeDiagram = `flowchart LR
+  subgraph json["JSON บน wire"]
+    j["{\"id\":1,\"name\":\"Ada\",\"email\":\"a@x.io\"}\n— key ซ้ำเป็น text"]
+  end
+  subgraph pb["Protobuf บน wire"]
+    p["[1→1][2→Ada][3→a@x.io]\n— tag ที่เป็นหมายเลข + ค่า binary"]
+  end`;
+
+การตัดสินใจออกแบบอย่างเดียวนี้ให้ผลตามมา 2 อย่าง:
+
+1. **มันกระชับ** ไม่มีชื่อ key ซ้ำ ไม่มีเครื่องหมายคำพูด ไม่มี whitespace — มีแค่ tag กับค่า
+2. **มัน evolve ได้** เพราะ *หมายเลข* คือตัวระบุ field คุณจึง rename `name` เป็น `full_name` ใน `.proto` ได้โดยไม่ทำให้ใครพัง — wire เห็นแค่ field `2` มาตลอด นี่คือรากฐานของการทำ schema evolution อย่างปลอดภัย (มีทั้งบทรออยู่ข้างหน้า)
+
+## ทำไมไม่ใช้ JSON ไปเลย?
+
+JSON เยี่ยมมากสำหรับ public API — อ่านออก, ใช้ได้ทุกที่, setup เป็นศูนย์ แต่สำหรับการเรียกกันระหว่าง service ที่ปริมาณสูง มันมี cost จริง ๆ ที่ protobuf เลี่ยงได้:
+
+| | JSON | Protobuf |
+|--|------|----------|
+| **ขนาด** | ส่ง key เป็น text ทุกครั้ง | tag ที่เป็นหมายเลข, ค่า binary |
+| **cost การ parse** | parse text แบบ reflective | decode binary ที่ขับด้วย schema |
+| **schema** | มีก็ได้ drift ง่าย | บังคับ และ compiler enforce |
+| **type safety** | ตอน runtime ลุ้นเอา | type ที่ generate มา ตอน compile |
+| **การ evolve** | อาศัย convention กับความกล้า | field number ทำให้เป็นระบบ |
+
+trade-off คือความตรงไปตรงมาอีกด้าน: protobuf **คนอ่านไม่ออก** บน wire และคุณต้องมี `.proto` เพื่อแปลความหมายของ byte นั่นเป็นดีลที่ดีสำหรับ traffic ภายใน และเป็นดีลที่แย่สำหรับ public API ที่อยาก `curl` ได้
+
+## workflow แบบ contract-first
+
+วินัยที่ protobuf บังคับคือ **เขียน contract ก่อน** ก่อนที่ทีมไหนจะเขียน code ทั้งสองฝั่งตกลง `.proto` กันก่อน: นี่คือ message เหล่านี้, นี่คือ method เหล่านี้ แล้ว codegen ก็สร้าง type ที่ตรงกันขึ้นมาทั้งสองฝั่ง schema จะ drift เงียบ ๆ ไม่ได้ เพราะทั้ง client และ server generate มาจากมัน
+
+<Callout title="สรุปในบรรทัดเดียว">
+Protocol Buffers เป็นทั้งภาษา schema และ binary wire format ที่กระชับ ทริกสำคัญของมันคือ **field number**: wire พก tag ที่เป็นหมายเลข ไม่ใช่ชื่อ — ซึ่งทำให้ message เล็ก, decode เร็ว และ rename ปลอดภัย schema แบบ contract-first นี้คือสิ่งที่ทุก feature อื่นของ gRPC สร้างต่อขึ้นมา
+</Callout>
+
+export const quizProto = [
+  {
+    q: 'Protocol Buffers เล่น 2 บทบาทอะไร?',
+    options: [
+      'database กับ cache',
+      'ภาษา schema กับ binary wire format',
+      'load balancer กับ proxy',
+      'logger กับ tracer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'จริง ๆ แล้ว protobuf ส่งอะไรบน wire สำหรับ field หนึ่ง?',
+    options: [
+      'ชื่อ field เป็น text ทุกครั้ง',
+      'field number (tag) บวกกับค่า binary',
+      'XML element',
+      'hash ของทั้ง message',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมคุณถึง rename field ใน `.proto` ได้โดยไม่ทำให้ client เดิมพัง?',
+    options: [
+      'เพราะ gRPC ส่ง schema ทั้งชุดใหม่ทุก call',
+      'เพราะ wire ระบุ field ด้วยหมายเลข ไม่ใช่ด้วยชื่อ',
+      'เพราะ JSON fallback ทำงานแทน',
+      'ทำไม่ได้ — rename ทำให้ client พังเสมอ',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ข้อเสียหลักของ protobuf เมื่อเทียบกับ JSON คืออะไร?',
+    options: [
+      'มัน parse ช้ากว่า',
+      'มันคนอ่านไม่ออกบน wire ถ้าไม่มี `.proto`',
+      'มันแทนข้อมูลแบบซ้อนกันไม่ได้',
+      'มันใช้ได้แค่ใน Go',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/protobuf-intro" questions={quizProto} />
+
+<ProgressTracker client:visible id="grpc-foundations/protobuf-intro" />

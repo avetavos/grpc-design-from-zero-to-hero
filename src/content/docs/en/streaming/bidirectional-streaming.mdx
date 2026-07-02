@@ -1,0 +1,160 @@
+---
+title: 'Bidirectional Streaming'
+description: 'Both sides stream independently over one connection — the shape for chat, multiplayer, and interactive sessions — with concurrent send and receive in three languages.'
+sidebar:
+  order: 4
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Both sides talk at once
+
+**Bidirectional streaming** opens one stream on which *both* the client and the server send messages, independently and at the same time. Neither side has to wait for the other; a message can flow in either direction whenever there is something to say.
+
+This is the shape for genuinely interactive sessions: chat, multiplayer game state, collaborative editing, or any protocol where a request and its responses are interleaved rather than lock-stepped.
+
+<Mermaid title="Bidirectional streaming: independent, interleaved messages" code={bdDiagram} />
+
+export const bdDiagram = `sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: join(room: "general")
+  S-->>C: "Sam joined"
+  C->>S: "hello everyone"
+  S-->>C: "Alex: hi Sam"
+  C->>S: "how's the deploy?"
+  S-->>C: "Alex: green"
+  Note over C,S: each side sends whenever it wants; order is per-direction`;
+
+## The contract
+
+Both the request and the response carry the `stream` keyword:
+
+```proto
+syntax = "proto3";
+package chat.v1;
+
+message ChatMessage {
+  string from = 1;
+  string text = 2;
+  int64  ts   = 3;
+}
+
+service Chat {
+  // Both sides stream ChatMessages independently.
+  rpc Chat(stream ChatMessage) returns (stream ChatMessage);
+}
+```
+
+## Both ends run a send loop and a receive loop
+
+The key difference from the one-directional streams: each side typically reads and writes **concurrently**. Reading and writing on the same stream from separate goroutines/threads/callbacks is safe and expected.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    stream, _ := client.Chat(ctx)
+
+    // receive loop (its own goroutine)
+    go func() {
+        for {
+            msg, err := stream.Recv()
+            if err == io.EOF { return }
+            if err != nil { log.Println(err); return }
+            fmt.Printf("%s: %s\n", msg.From, msg.Text)
+        }
+    }()
+
+    // send loop (main goroutine)
+    for _, text := range outgoing {
+        stream.Send(&chatv1.ChatMessage{From: "me", Text: text})
+    }
+    stream.CloseSend() // done sending; server may still send
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def outgoing():
+        for text in messages:
+            yield chat_pb2.ChatMessage(**{"from": "me", "text": text})
+
+    responses = client.Chat(outgoing())  # sending and receiving run concurrently
+    for msg in responses:
+        print(f"{msg.from}: {msg.text}")
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const call = client.chat();
+    call.on('data', (msg: ChatMessage) => console.log(`${msg.from}: ${msg.text}`));
+    call.on('end', () => console.log('server closed its side'));
+
+    for (const text of outgoing) call.write({ from: 'me', text });
+    call.end(); // done sending; the server may keep sending
+    ```
+  </TabItem>
+</Tabs>
+
+The server implementation mirrors this: it loops on `Recv` and calls `Send` whenever it has something to deliver — often fanning a received message out to other connected clients.
+
+## Design notes
+
+- **Ordering is per-direction.** Messages the client sends arrive at the server in order; messages the server sends arrive at the client in order. But the two directions are independent — there is no global ordering between a client message and a server message.
+- **Half-close is one-sided.** `CloseSend` (client) or returning (server) ends *that* side's sending while the other side keeps streaming. The call is fully done only when both directions close.
+- **Read and write concurrently.** Don't block your receive loop behind your send loop, or a full flow-control window can deadlock you (next lesson).
+- **This is not a message broker.** A bidi stream is point-to-point between one client and one server; fanning out to *many* clients (a chat room) is application logic on top, usually backed by a pub/sub system.
+
+<Callout title="The one-line takeaway">
+Bidirectional streaming puts `stream` on both the request and response, so each side sends whenever it wants over one connection. Read and write concurrently, remember ordering is only guaranteed per-direction, and treat it as point-to-point — fanning out to many clients is your job, not the stream's.
+</Callout>
+
+export const quizBD = [
+  {
+    q: 'What defines a bidirectional streaming RPC in the .proto?',
+    options: [
+      '`stream` on the request only',
+      '`stream` on the response only',
+      '`stream` on both the request and the response',
+      'A special `bidi` keyword',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'What ordering guarantee does a bidi stream give?',
+    options: [
+      'A single global order across both directions',
+      'Order is guaranteed within each direction, but the two directions are independent',
+      'No ordering at all',
+      'Only the server’s messages are ordered',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why do both ends usually read and write concurrently?',
+    options: [
+      'To use more CPU cores',
+      'So a blocked send/receive doesn’t stall the other direction and risk a flow-control deadlock',
+      'Because protobuf requires two threads',
+      'To avoid using a channel',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How do you fan one client’s message out to many other clients (a chat room)?',
+    options: [
+      'The bidi stream does it automatically',
+      'It is application logic on top of the stream, usually backed by pub/sub',
+      'By enabling multicast in HTTP/2',
+      'By opening a second response stream',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/bidirectional-streaming" questions={quizBD} />
+
+<ProgressTracker client:visible id="streaming/bidirectional-streaming" />

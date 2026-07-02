@@ -1,0 +1,158 @@
+---
+title: 'Deadlines & Cancellation'
+description: 'ทำไมทุก call ต้องมี deadline, deadline ส่งต่อกันข้าม call chain อย่างไร และ cancellation หยุดงานที่เสียเปล่าได้อย่างไร'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## deadline ไม่ใช่ timeout
+
+**deadline** คือจุดเวลาแบบสัมบูรณ์ — "ยอมแพ้ถ้ายังไม่เสร็จภายใน 10:00:03.500" ส่วน **timeout** คือช่วงเวลา — "ยอมแพ้หลัง 300ms" — ซึ่ง library ส่วนใหญ่แปลงเป็น deadline ข้างในอยู่ดี
+
+ความต่างนี้สำคัญ เพราะ gRPC **ส่งต่อ deadline** ไม่ใช่ timeout เมื่อ service A เรียก B แล้ว B เรียก C, deadline สัมบูรณ์ *ตัวเดียวกัน* วิ่งลงไปตาม chain แต่ละ hop จึงรู้ว่าเหลือเวลาจริง ๆ เท่าไร ไม่มีใครทำงานต่อกับ request ที่ผู้เรียกยอมแพ้ไปแล้ว
+
+<Mermaid title="deadline สัมบูรณ์ตัวเดียววิ่งลงไปทั้ง call chain" code={deadlineDiagram} />
+
+export const deadlineDiagram = `flowchart LR
+  a["Service A\ndeadline = now + 300ms"] -->|deadline propagated| b["Service B\nsees ~280ms left"]
+  b -->|deadline propagated| c["Service C\nsees ~250ms left"]
+  c -. "if deadline passes,\nall hops abort" .-> x["DEADLINE_EXCEEDED"]`;
+
+## ตั้งเสมอ
+
+กฎเชิงปฏิบัติที่สำคัญที่สุดใน gRPC: **ทุก call ต้องมี deadline** call ที่ไม่มี deadline จะรอตลอดกาลโดย default dependency ที่ช้าหรือค้างตัวเดียวจะผูก request ไว้ ซึ่งผูก goroutine/thread/connection ไว้ และตอน load สูงมันลามเป็น stall ทั้งระบบ — เป็นวิธีคลาสสิกที่ service ช้าตัวเดียวลาก service ที่อยู่เหนือขึ้นไปล้มตามกันหมด
+
+นี่คือวิธีตั้ง deadline บน call:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+    defer cancel() // always release the context
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if status.Code(err) == codes.DeadlineExceeded {
+        log.Println("call ran out of time")
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    try:
+        # timeout is converted to an absolute deadline internally
+        user = client.GetUser(user_pb2.GetUserRequest(id=42), timeout=0.3)
+    except grpc.RpcError as e:
+        if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            print("call ran out of time")
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const deadline = new Date(Date.now() + 300); // absolute time
+    client.getUser({ id: 42 }, { deadline }, (err, user) => {
+      if (err?.code === status.DEADLINE_EXCEEDED) {
+        console.log('call ran out of time');
+      }
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## cancellation หยุดงานที่เสียเปล่า
+
+deadline เป็นทางหนึ่งที่ทำให้ call จบก่อนเวลา; **cancellation** แบบชัดเจนเป็นอีกทาง ถ้า client หายไป — user ปิดแท็บ, parent request เองถูก cancel — gRPC จะส่งสัญญาณให้ server รู้ว่า call ถูก cancel แล้ว server ที่เขียนดี ๆ จะ *เช็ค* การ cancel แล้วหยุด: ยกเลิก database query, break loop และคืน resource แทนที่จะคำนวณผลที่ไม่มีใครอ่าน
+
+ฝั่ง server คุณเฝ้าดู context ของ request:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        select {
+        case <-ctx.Done(): // client cancelled or deadline exceeded
+            return nil, status.FromContextError(ctx.Err()).Err()
+        default:
+        }
+        // ... do the work, ideally passing ctx to the DB call too
+        return lookup(ctx, req.Id)
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    def GetUser(self, request, context):
+        if not context.is_active():  # client cancelled / deadline passed
+            return user_pb2.User()
+        # pass context to downstream calls so cancellation propagates
+        return lookup(request.id, context)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    getUser(call, callback) {
+      if (call.cancelled) return; // client already gave up
+      call.on('cancelled', () => stopWork());
+      doLookup(call.request.id, callback);
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+กฎทอง: **ส่งต่อ context** ส่ง context ของ request ที่เข้ามาไปยังทุก downstream gRPC call และทุก database query แล้ว deadline หรือ cancellation ตัวเดียวจะคลี่ต้นไม้ของงานทั้งหมดออกอย่างสะอาด
+
+<Callout title="The one-line takeaway">
+ตั้ง **deadline บนทุก call** — call ที่ไม่มี deadline จะรอตลอดกาล และ dependency ที่ค้างตัวเดียวทำให้ทั้ง service stall ได้ gRPC ส่งต่อ deadline *สัมบูรณ์* ลงไปตาม call chain และ cancellation ให้ server หยุดงานที่เสียเปล่าเมื่อผู้เรียกหายไปแล้ว ร้อย context ผ่าน downstream call เสมอเพื่อให้ทุกอย่างคลี่ออกพร้อมกัน
+</Callout>
+
+export const quizDeadline = [
+  {
+    q: 'gRPC ส่งต่ออะไรลงไปตาม call chain?',
+    options: [
+      'ช่วง timeout ที่ reset ใหม่ทุก hop',
+      'deadline สัมบูรณ์ตัวเดียวกัน เพื่อให้แต่ละ hop รู้เวลาจริงที่เหลือ',
+      'ไม่ส่งอะไร — แต่ละ service ตั้งเอง',
+      'IP address ของ client',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'gRPC call ที่ไม่ได้ตั้ง deadline จะเป็นอย่างไร?',
+    options: [
+      'ล้มเหลวทันที',
+      'ใช้ default 1 วินาที',
+      'รอได้ตลอดกาล เสี่ยง stall ลามทั้งระบบ',
+      'retry 3 ครั้ง',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'status code ไหนบอกว่า call หมดเวลา?',
+    options: [
+      'NOT_FOUND',
+      'DEADLINE_EXCEEDED',
+      'INVALID_ARGUMENT',
+      'UNAUTHENTICATED',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'server หลีกเลี่ยงการคำนวณผลที่ไม่มีใครอ่านอย่างไร?',
+    options: [
+      'ด้วยการไม่สนใจ client เลย',
+      'ด้วยการเช็ค context ของ request ว่าถูก cancel แล้วหยุดงาน',
+      'ด้วยการ cache ทุก response ตลอดกาล',
+      'ด้วยการเปิด connection ที่สอง',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/deadlines-and-cancellation" questions={quizDeadline} />
+
+<ProgressTracker client:visible id="building-services/deadlines-and-cancellation" />

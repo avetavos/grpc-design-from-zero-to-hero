@@ -1,0 +1,97 @@
+---
+title: 'Flow Control & Backpressure'
+description: 'How HTTP/2 flow control creates backpressure, what happens when a fast producer meets a slow consumer, and why unbounded buffering is the real danger.'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The problem streams create
+
+A stream lets a producer send as fast as it can. But what if the consumer reads slowly? Without a brake, the fast side would pile up messages in memory faster than the slow side drains them — until something runs out of memory and falls over.
+
+The brake is **flow control**, and the pressure it pushes back on the producer is **backpressure**.
+
+## HTTP/2 flow control, for free
+
+Because gRPC rides on HTTP/2, it inherits HTTP/2's flow control automatically. Each side advertises a **window** — how many bytes it is currently willing to receive. As data arrives and is consumed, the receiver replenishes the window; if the receiver stops consuming, the window drains to zero and the sender must stop.
+
+<Mermaid title="A full window stops the producer until the consumer catches up" code={fcDiagram} />
+
+export const fcDiagram = `flowchart LR
+  prod["fast producer"] -->|writes| win["flow-control window"]
+  win -->|reads| cons["slow consumer"]
+  win -. "window empty →\nSend blocks" .-> prod
+  cons -. "consume →\nreplenish window" .-> win`;
+
+The effect: when you call `Send` and the window is full, `Send` **blocks** (or, in callback APIs, signals "not ready"/`drain`) until the consumer catches up. The transport is telling the producer, "slow down." That is backpressure working correctly — and it happens without you writing any of it.
+
+## Where it goes wrong: defeating your own backpressure
+
+The danger is not HTTP/2 — it handles flow control well. The danger is code that **buffers around** the backpressure and reintroduces the unbounded-memory problem:
+
+- **Reading everything into a slice/list before processing.** If your receive loop appends every message to an in-memory list, you've turned a bounded stream into unbounded memory. Process each message as it arrives.
+- **A send loop that never blocks.** In callback-based runtimes (Node), ignoring the `write()` return value / `drain` event lets you queue unbounded data in the library's internal buffer. Respect the "please wait" signal.
+- **Not reading while writing.** On a bidi stream, if you only send and never receive, your peer's flow-control acknowledgements pile up and both sides can deadlock. Always run the receive loop concurrently.
+
+## Design guidance
+
+- **Process, don't accumulate.** Handle each streamed message and let it go; don't collect them all first.
+- **Let backpressure reach the source.** If you're relaying a stream (reading from a DB, sending to a client), let a blocked `Send` pause your reads from the DB too. Then the slow consumer naturally throttles the fast source.
+- **Bound everything you can't stream.** Cap message counts and sizes so a misbehaving peer can't force unbounded work.
+- **Know when NOT to stream.** If a slow consumer would force the server to hold state or memory for a long time, a stream can be a liability. Sometimes many small unary calls (each independently retryable and rebalanceable) are the safer design than one long stream — the same trade-off from this module's intro.
+
+<Callout title="The one-line takeaway">
+gRPC gets flow control free from HTTP/2: a full window makes `Send` block, which is backpressure telling the producer to slow down. The failure mode is your own code buffering around it — reading a whole stream into memory, ignoring `drain`, or not reading while writing. Process each message as it arrives and let the backpressure reach all the way back to the source.
+</Callout>
+
+export const quizFC = [
+  {
+    q: 'What is backpressure in a gRPC stream?',
+    options: [
+      'The server rejecting the connection',
+      'The transport signalling a fast producer to slow down when the consumer can’t keep up',
+      'Automatic message compression',
+      'Retrying failed messages',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Where does gRPC’s flow control come from?',
+    options: [
+      'A custom gRPC buffer you configure',
+      'HTTP/2’s per-stream flow-control windows, inherited automatically',
+      'The operating system’s TCP buffer only',
+      'The .proto file',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the most common way developers accidentally defeat backpressure?',
+    options: [
+      'Using TLS',
+      'Reading the whole stream into an in-memory list instead of processing each message as it arrives',
+      'Setting a deadline',
+      'Using server streaming',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'On a bidirectional stream, why must you read while you write?',
+    options: [
+      'To reduce latency only',
+      'If you only send and never receive, flow-control acknowledgements pile up and both sides can deadlock',
+      'Because writing is disabled until you read',
+      'To keep the TLS session alive',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/flow-control-backpressure" questions={quizFC} />
+
+<ProgressTracker client:visible id="streaming/flow-control-backpressure" />

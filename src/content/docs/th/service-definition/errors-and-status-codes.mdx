@@ -1,0 +1,153 @@
+---
+title: 'Errors & Status Codes'
+description: 'status code model ของ gRPC, วิธี return error ที่มีความหมาย และ rich error ด้วย google.rpc.Status พร้อม error details'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## error เป็นส่วนหนึ่งของ contract
+
+gRPC ไม่ใช้ HTTP status code ทุก call จบด้วย **gRPC status**: `code` ที่เป็นตัวเลข, `message` ที่มนุษย์อ่านได้ (optional), และ `details` แบบมีโครงสร้าง (optional) call ที่สำเร็จ return `OK`; อย่างอื่นคือ error ที่ client รับมาเป็น status ที่มี type ไม่ใช่ response body ที่ต้อง parse
+
+การเลือก code ที่ถูกต้องคือการตัดสินใจออกแบบ — client แตกเงื่อนไขจากมัน, retry จากมัน, และปลุกคุณกลางดึกจากมัน code ที่คลุมเครือทำให้ API น่าหงุดหงิด; code ที่แม่นยำทำให้มันอธิบายตัวเองได้
+
+## status code ที่คุณจะใช้จริง
+
+มี code ประมาณ 17 ตัว แต่ไม่กี่ตัวครอบคลุมเกือบทุกอย่าง:
+
+| Code | ความหมาย | สาเหตุที่พบบ่อย |
+|------|---------|---------------|
+| `OK` | สำเร็จ | — |
+| `INVALID_ARGUMENT` | request ผิดรูปแบบ | client ส่ง field ผิด; แก้ input แล้วจะช่วยได้ |
+| `NOT_FOUND` | entity ไม่มีอยู่ | `GetUser` กับ id ที่ไม่มี |
+| `ALREADY_EXISTS` | entity มีอยู่แล้ว | `CreateUser` ด้วย email ที่ถูกใช้ไปแล้ว |
+| `PERMISSION_DENIED` | authenticate แล้วแต่ไม่ได้รับอนุญาต | caller ไม่มี role |
+| `UNAUTHENTICATED` | ไม่มี credential ที่ถูกต้อง | token หายหรือผิด |
+| `FAILED_PRECONDITION` | state ของระบบไม่พร้อมสำหรับ call นี้ | ลบ bucket ที่ยังไม่ว่าง |
+| `RESOURCE_EXHAUSTED` | ชน quota หรือ rate limit | request มากเกินไป |
+| `DEADLINE_EXCEEDED` | call รันเกิน deadline | server หรือ network ช้า |
+| `UNAVAILABLE` | server ล่มหรือติดต่อไม่ได้ | ชั่วคราว; มักปลอดภัยที่จะ retry |
+| `INTERNAL` | บั๊กฝั่ง server | failure ที่ไม่คาดคิด |
+
+มี 2 คู่ที่คนสับสนบ่อย:
+
+- **`INVALID_ARGUMENT` vs `FAILED_PRECONDITION`** — ตัวแรกหมายถึง "input คุณผิด แก้แล้วจะช่วยได้"; ตัวหลังหมายถึง "input คุณโอเค แต่ระบบไม่ได้อยู่ใน state ที่ทำสำเร็จได้"
+- **`UNAUTHENTICATED` vs `PERMISSION_DENIED`** — ตัวแรกหมายถึง "ฉันไม่รู้ว่าคุณเป็นใคร"; ตัวหลังหมายถึง "ฉันรู้ว่าคุณเป็นใคร และคุณไม่ได้รับอนุญาต"
+
+`UNAVAILABLE` และ `DEADLINE_EXCEEDED` สำคัญต่อการ retry: มันบอกว่าเป็น failure *ชั่วคราว* client (และ interceptor) จึงมัก retry มัน ในขณะที่ `INVALID_ARGUMENT` ไม่ควร retry แบบเดิมซ้ำเด็ดขาด
+
+## การ return error
+
+คุณไม่ได้ `return` ข้อความ error ใน response — คุณจบ call ด้วย status ทุกภาษาเปิดเผยไอเดียเดียวกัน:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    import (
+        "google.golang.org/grpc/codes"
+        "google.golang.org/grpc/status"
+    )
+
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        u, ok := s.store[req.Id]
+        if !ok {
+            return nil, status.Errorf(codes.NotFound, "user %d not found", req.Id)
+        }
+        return u, nil
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    import grpc
+
+    def GetUser(self, request, context):
+        user = self.store.get(request.id)
+        if user is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"user {request.id} not found")
+        return user
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    import { status } from '@grpc/grpc-js';
+
+    getUser(call, callback) {
+      const user = this.store.get(call.request.id);
+      if (!user) {
+        callback({ code: status.NOT_FOUND, message: `user ${call.request.id} not found` });
+        return;
+      }
+      callback(null, user);
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+ฝั่ง client จะได้ status เดียวกันกลับมาเป็น error ที่มี type ซึ่งพก `code` และ `message` มาด้วย — caller จึงแตกเงื่อนไข `NOT_FOUND` กับ `UNAVAILABLE` ได้โดยไม่ต้อง match string
+
+## Rich error ด้วย details
+
+code กับ message มักจะพอ เมื่อไม่พอ — เมื่อ client ต้องการรายละเอียดที่ *machine-readable* เช่น field ไหน validate ไม่ผ่าน — gRPC มี model ที่รวยกว่า: `google.rpc.Status` พก list `details` ของ message ที่มี type ได้หลายตัว
+
+<Mermaid title="error ของ gRPC: code + message และ details แบบมีโครงสร้าง (optional)" code={errorDiagram} />
+
+export const errorDiagram = `flowchart LR
+  err["gRPC status"] --> code["code: INVALID_ARGUMENT"]
+  err --> msg["message: validation failed"]
+  err --> det["details[]"]
+  det --> bad["BadRequest {\n field: email,\n desc: not a valid address }"]`;
+
+detail type มาตรฐาน (`BadRequest`, `ErrorInfo`, `QuotaFailure`, `RetryInfo` และอื่น ๆ จาก `google.rpc`) ทำให้ server บอกได้แม่น ๆ ว่า "field `email` ไม่ถูกต้อง" หรือ "retry หลังจาก 3 วินาที" และทำให้ client react แบบ programmatic ได้ ใช้ code เปล่า ๆ สำหรับเคสทั่วไป; หยิบ rich details มาใช้เมื่อ client ต้องการ error data แบบมีโครงสร้างจริง ๆ
+
+<Callout title="สรุปหนึ่งบรรทัด">
+call ของ gRPC จบด้วย **status** — `code`, `message`, และ `details` (optional) — ไม่ใช่ HTTP code เลือก code ให้แม่นยำ (`NOT_FOUND` vs `INVALID_ARGUMENT` vs `FAILED_PRECONDITION`; `UNAUTHENTICATED` vs `PERMISSION_DENIED`) เพราะ client retry และแตกเงื่อนไขจากมัน หยิบ `google.rpc.Status` details มาใช้เมื่อ client ต้องการรายละเอียดแบบ machine-readable
+</Callout>
+
+export const quizErrors = [
+  {
+    q: 'gRPC call รายงาน failure อย่างไร?',
+    options: [
+      'HTTP 4xx/5xx status code',
+      'gRPC status ที่มี code เป็นตัวเลข, message, และ details (optional)',
+      'field พิเศษใน response message',
+      'ด้วยการปิด TCP connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'client ส่ง request ที่รูปแบบถูกต้อง แต่ bucket เป้าหมายยังไม่ว่าง จึงลบไม่ได้ code ไหนเหมาะที่สุด?',
+    options: ['INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'NOT_FOUND', 'INTERNAL'],
+    answer: 1,
+  },
+  {
+    q: 'ความต่างระหว่าง UNAUTHENTICATED กับ PERMISSION_DENIED คืออะไร?',
+    options: [
+      'มันเหมือนกัน',
+      'UNAUTHENTICATED = เราไม่รู้ว่าคุณเป็นใคร; PERMISSION_DENIED = เรารู้ และคุณไม่ได้รับอนุญาต',
+      'PERMISSION_DENIED ใช้กับ admin เท่านั้น',
+      'UNAUTHENTICATED หมายถึง server ล่ม',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เมื่อไรควรใช้ google.rpc.Status details แทนที่จะใช้แค่ code กับ message?',
+    options: [
+      'ทุกครั้ง สำหรับทุก error',
+      'เมื่อ client ต้องการรายละเอียดแบบ machine-readable เช่น field ไหน validate ไม่ผ่าน',
+      'เฉพาะสำหรับ response ที่เป็น OK',
+      'ไม่เลย — details ถูก deprecate แล้ว',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="service-definition/errors-and-status-codes" questions={quizErrors} />
+
+<ProgressTracker client:visible id="service-definition/errors-and-status-codes" />

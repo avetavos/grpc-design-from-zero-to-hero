@@ -1,0 +1,125 @@
+---
+title: 'Repeated, Maps & Well-Known'
+description: 'list ด้วย repeated, map แบบ key/value และ standard library ของ google.protobuf — Timestamp, Duration, Any, wrapper, Empty และ FieldMask'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## repeated field คือ list
+
+ใส่ `repeated` เข้าไปที่ field แล้วมันจะกลายเป็น list ที่มีลำดับของ type นั้น — มีค่าได้ตั้งแต่ศูนย์ตัวขึ้นไป
+
+```proto
+message Playlist {
+  string          name  = 1;
+  repeated string songs = 2;   // string 0..N ตัว
+  repeated Track  tracks = 3;  // message 0..N ตัว
+}
+```
+
+repeated field รักษาลำดับไว้ และ list ว่างก็คือ default — คุณไม่เคยส่ง "null กับ empty" แยกกัน มันคือสิ่งเดียวกัน สำหรับ list ของ numeric scalar protobuf ใช้ **packed encoding** เป็น default ใน proto3 คือเก็บค่าติดกันโดยไม่มี tag ต่อ element ทำให้ array ตัวเลขขนาดใหญ่กะทัดรัด
+
+## map คือคู่ key/value
+
+**map** เป็น syntactic sugar ของ repeated entry แบบ key/value ให้ container แบบ associative
+
+```proto
+message Config {
+  map<string, string> labels   = 1;
+  map<int64, User>    user_by_id = 2;
+}
+```
+
+key เป็น integer, bool หรือ string type ก็ได้ ส่วน value เป็น type อะไรก็ได้ยกเว้น map อีกตัว มีสองข้อควรรู้: ลำดับของ map **ไม่** ถูกรับประกันบน wire และ map เป็น `repeated` ไม่ได้ (ถ้าต้องการ list ของ map ให้ห่อไว้ใน message)
+
+## well-known type: standard library ของ protobuf
+
+คุณไม่ต้อง model เวลา, duration หรือ "value อะไรก็ได้" ขึ้นมาเอง package `google.protobuf` มี **well-known type** มาให้ — import แล้วใช้ได้เลย
+
+<Mermaid title="well-known type ที่คุณจะได้หยิบมาใช้จริง" code={wktDiagram} />
+
+export const wktDiagram = `flowchart LR
+  time["Timestamp / Duration\n→ จุดเวลา & ช่วงเวลา"]
+  wrap["Int32Value, StringValue…\n→ scalar ที่ nullable"]
+  any["Any / Struct\n→ shape แบบ dynamic / ไม่รู้"]
+  util["Empty / FieldMask\n→ call ไม่มี arg & partial update"]`;
+
+ตัวที่คุณจะใช้บ่อยมาก:
+
+- **`Timestamp`** และ **`Duration`** — จุดเวลาที่แม่นยำและช่วงเวลา ควรใช้พวกนี้แทน `int64` ดิบ ๆ ที่แปลว่า "millisecond ตั้งแต่อะไรสักอย่าง" เสมอ
+- **wrapper** (`Int32Value`, `StringValue`, `BoolValue`, …) — กล่อง message ที่ห่อ scalar ไว้เพื่อให้ nullable เป็นทางเลือกเก่าก่อนจะมี keyword `optional` แต่ยังพบบ่อยใน API ที่มีอยู่
+- **`Any`** — บรรจุ message ที่ serialize แล้วแบบอะไรก็ได้พร้อม type URL ของมัน สำหรับ payload ที่ dynamic จริง ๆ ทรงพลังแต่ทำลาย static typing ใช้อย่างประหยัด
+- **`Struct`** — ข้อมูลคล้าย JSON แบบอิสระ (object, list, value) เมื่อ shape ไม่รู้ล่วงหน้าจริง ๆ
+- **`Empty`** — message ที่ไม่มี field สำหรับ RPC ที่ไม่รับหรือไม่คืนอะไร
+- **`FieldMask`** — list ของ field path เป็นวิธีมาตรฐานในการบอกว่า "update เฉพาะ field เหล่านี้" ใน API แบบ partial update
+
+```proto
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/field_mask.proto";
+
+message Event {
+  string                    name       = 1;
+  google.protobuf.Timestamp created_at = 2;
+}
+
+message UpdateUserRequest {
+  User                        user       = 1;
+  google.protobuf.FieldMask   update_mask = 2;  // จะเปลี่ยน field ไหนบ้าง
+}
+```
+
+<Callout title="สรุปหนึ่งบรรทัด">
+`repeated` ให้ list ที่มีลำดับ (ว่าง = ไม่มี และ list ตัวเลขแพ็กแน่น) ส่วน `map<k,v>` ให้คู่ key/value (ไม่มีลำดับบน wire และ value เป็น map ไม่ได้) และอย่า reinvent shape ที่พบบ่อย — หยิบจาก `google.protobuf` เอา `Timestamp`, `Duration`, wrapper, `Any`, `Empty` และ `FieldMask` สำหรับ partial update
+</Callout>
+
+export const quizRepeated = [
+  {
+    q: 'การใส่ `repeated` ที่ field ทำอะไร?',
+    options: [
+      'ทำให้ field เป็น required',
+      'เปลี่ยนเป็น list ที่มีลำดับของค่าตั้งแต่ศูนย์ตัวขึ้นไป',
+      'เข้ารหัสแต่ละค่า',
+      'บังคับให้ส่งสองครั้ง',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ข้อไหนจริงเกี่ยวกับ map ของ protobuf?',
+    options: [
+      'ลำดับบน wire ถูกรับประกัน',
+      'ลำดับไม่ถูกรับประกัน และ value ของ map เป็น map เองไม่ได้',
+      'key ต้องเป็น string เสมอ',
+      'เร็วกว่า repeated field ในทุกกรณี',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ควร represent จุดเวลาใน message อย่างไร?',
+    options: [
+      'int64 ดิบ ๆ เป็น millisecond พร้อม comment',
+      'google.protobuf.Timestamp',
+      'string ที่ format ไว้',
+      'repeated int32',
+    ],
+    answer: 1,
+  },
+  {
+    q: '`google.protobuf.FieldMask` ใช้ทำอะไร?',
+    options: [
+      'เข้ารหัส field',
+      'บอกว่าจะเปลี่ยน field ไหนบ้างใน partial update',
+      'บีบอัด repeated field',
+      'ประกาศ field ที่ required',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/repeated-maps-wellknown" questions={quizRepeated} />
+
+<ProgressTracker client:visible id="protocol-buffers/repeated-maps-wellknown" />

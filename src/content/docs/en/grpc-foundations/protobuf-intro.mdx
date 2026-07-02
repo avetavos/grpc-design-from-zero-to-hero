@@ -1,0 +1,120 @@
+---
+title: 'Protocol Buffers Intro'
+description: 'The contract-first idea, why a binary schema beats ad-hoc JSON, and how field numbers make protobuf compact and evolvable.'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Protobuf is the contract
+
+**Protocol Buffers** (protobuf) is the language you use to describe your data and services, and the format they travel in. It plays two roles at once:
+
+- **A schema language** — a `.proto` file that declares your messages and services in a way any language can compile.
+- **A wire format** — the compact binary encoding those messages use when they cross the network.
+
+In gRPC, protobuf *is* the contract. Everything — the type safety, the codegen, the efficiency — flows from it.
+
+## A message is fields with numbers
+
+Here is the smallest interesting message:
+
+```proto
+syntax = "proto3";
+
+message User {
+  int64  id    = 1;
+  string name  = 2;
+  string email = 3;
+}
+```
+
+The `= 1`, `= 2`, `= 3` are **field numbers**, and they are the most important idea in protobuf. On the wire, protobuf does **not** send field names. It sends the field *number* and the value. So `name = "Ada"` becomes roughly "field 2, string, Ada" — a couple of bytes of tag plus the value.
+
+<Mermaid title="JSON sends names every time; protobuf sends small numbered tags" code={encodeDiagram} />
+
+export const encodeDiagram = `flowchart LR
+  subgraph json["JSON on the wire"]
+    j["{\"id\":1,\"name\":\"Ada\",\"email\":\"a@x.io\"}\n— keys repeated as text"]
+  end
+  subgraph pb["Protobuf on the wire"]
+    p["[1→1][2→Ada][3→a@x.io]\n— numbered tags + binary values"]
+  end`;
+
+Two consequences fall out of this one design choice:
+
+1. **It's compact.** No repeated key names, no quotes, no whitespace — just tags and values.
+2. **It's evolvable.** Because the *number* identifies the field, you can rename `name` to `full_name` in the `.proto` without breaking anyone — the wire only ever saw field `2`. This is the foundation of safe schema evolution (a whole later lesson).
+
+## Why not just use JSON?
+
+JSON is wonderful for public APIs — readable, universal, zero setup. But for high-volume service-to-service calls it has real costs that protobuf avoids:
+
+| | JSON | Protobuf |
+|--|------|----------|
+| **Size** | Keys sent as text, every time | Numbered tags, binary values |
+| **Parse cost** | Reflective text parsing | Schema-driven binary decode |
+| **Schema** | Optional, drifts easily | Mandatory, compiler-enforced |
+| **Type safety** | Runtime, hope-for-the-best | Generated types, compile-time |
+| **Evolution** | Convention and courage | Field numbers make it structured |
+
+The trade-off is honesty in the other direction: protobuf is **not human-readable** on the wire, and you need the `.proto` to interpret bytes. That's a fine deal for internal traffic and a poor one for a `curl`-friendly public API.
+
+## The contract-first workflow
+
+The discipline protobuf imposes is **write the contract first**. Before either team writes code, they agree on the `.proto`: these are the messages, these are the methods. Then codegen produces matching types on both sides. The schema can't silently drift, because both the client and the server are generated from it.
+
+<Callout title="The one-line takeaway">
+Protocol Buffers is both a schema language and a compact binary wire format. Its key trick is **field numbers**: the wire carries numbered tags, not names — which makes messages small, decoding fast, and renames safe. That contract-first schema is the thing every other gRPC feature is built on.
+</Callout>
+
+export const quizProto = [
+  {
+    q: 'What two roles does Protocol Buffers play?',
+    options: [
+      'A database and a cache',
+      'A schema language and a binary wire format',
+      'A load balancer and a proxy',
+      'A logger and a tracer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What does protobuf actually send on the wire for a field?',
+    options: [
+      'The field name as text, every time',
+      'The field number (tag) plus the binary value',
+      'An XML element',
+      'A hash of the whole message',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why can you rename a field in a .proto without breaking existing clients?',
+    options: [
+      'Because gRPC re-sends the whole schema each call',
+      'Because the wire identifies fields by number, not by name',
+      'Because JSON fallback kicks in',
+      'You cannot — renames always break clients',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the main downside of protobuf versus JSON?',
+    options: [
+      'It is slower to parse',
+      'It is not human-readable on the wire without the .proto',
+      'It cannot represent nested data',
+      'It only works in Go',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/protobuf-intro" questions={quizProto} />
+
+<ProgressTracker client:visible id="grpc-foundations/protobuf-intro" />

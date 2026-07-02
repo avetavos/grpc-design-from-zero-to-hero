@@ -1,0 +1,116 @@
+---
+title: 'Evolving Schemas'
+description: 'กฎที่ทำให้ protobuf schema เปลี่ยนได้โดยไม่ทำให้ client ที่ deploy ไปแล้วพัง — change ที่ปลอดภัย, change ที่ทำข้อมูลเสียแบบเงียบ ๆ และวินัยเรื่อง reserved'
+sidebar:
+  order: 6
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## เก่ากับใหม่ต้องอยู่ด้วยกันได้
+
+ในระบบจริง client กับ server deploy คนละเวลา server ใหม่จะได้รับ message จาก client เก่า และ server เก่าจะได้รับ message จาก client ใหม่ schema ของคุณต้องทำให้ **ทั้งสองทิศทางยังทำงานได้** — นั่นคือ *backward* และ *forward* compatibility และ protobuf ถูกออกแบบมาให้ทำได้ถ้าคุณทำตามกฎ
+
+<Mermaid title="schema change ต้องรอดใน fleet ที่ปนกัน" code={compatDiagram} />
+
+export const compatDiagram = `flowchart TB
+  newc["client ใหม่"] -->|field เพิ่ม| olds["server เก่า\n(ข้าม field ที่ไม่รู้จัก)"]
+  oldc["client เก่า"] -->|ไม่มี field ใหม่| news["server ใหม่\n(อ่าน default)"]`;
+
+กลไกที่ทำให้เป็นแบบนี้ได้คือสิ่งที่คุณรู้อยู่แล้ว: **field ถูกระบุด้วย number** server เก่าที่ได้รับ field number ที่ไม่รู้จักก็แค่ข้ามมันไป server ใหม่ที่ไม่ได้รับ field ที่มันคาดหวังก็อ่าน default number ไม่ใช่ชื่อ คือสิ่งที่รักษาความสงบไว้
+
+## change ที่ปลอดภัยเสมอ
+
+พวกนี้ไม่มีทางทำให้ client ที่ deploy แล้วพัง:
+
+- **เพิ่ม field ใหม่** ด้วย number ที่สดใหม่ไม่เคยใช้ code เก่าข้ามมัน code ใหม่อ่านมัน (เป็น default เมื่อไม่มี)
+- **ลบ field** — *ตราบใดที่คุณ `reserved` number ของมัน* (ดูด้านล่าง) client เก่าที่ยังส่งมาก็ถูกข้ามไปเฉย ๆ
+- **rename field** wire ถือ number ดังนั้นชื่อเปลี่ยนได้ฟรี
+- **เพิ่ม value ใหม่ให้ enum** หรือ field ใหม่ให้ `oneof` client เก่ามอง unknown เป็น unknown
+- **เพิ่ม RPC method ใหม่** ให้ service client ที่มีอยู่ไม่ได้เรียกมัน ไม่มีอะไรพัง
+
+## change ที่พัง — แบบเงียบ ๆ
+
+พวกนี้ compile ผ่านแล้วไปทำข้อมูลเสียหรือทำ client crash บน production:
+
+- **reuse number ของ field ที่ลบไป** กับ field อื่น bytes เก่าถูก decode เป็น type ใหม่ นี่คือหายนะคลาสสิก
+- **เปลี่ยน type ของ field** แบบเข้ากันไม่ได้ (เช่น `int32` → `string`) bytes บน wire ไม่ตรงกับที่ผู้อ่านคาดหวัง
+- **renumber field ที่มีอยู่** client ที่ deploy แล้วทุกตัวยังใช้ number เดิม คุณเพิ่งสลับความหมายของ field สองตัว
+- **เปลี่ยน field ระหว่าง `repeated` กับ singular** หรือย้าย field เข้า/ออกจาก `oneof`
+
+จุดร่วม: **อะไรก็ตามที่เปลี่ยนความหมายของ number คือ breaking change** ถึงแม้ `.proto` จะยัง compile ได้ก็ตาม
+
+## วินัยเรื่อง reserved
+
+เพราะอันตรายคือการ *reuse* การป้องกันจึงง่ายและเป็นกลไก: **เมื่อลบ field ให้ `reserved` number และชื่อของมันทันที**
+
+```proto
+message User {
+  reserved 3, 7;                 // field number ที่ปลดระวาง — ห้าม reuse
+  reserved "email", "phone";     // ชื่อที่ปลดระวาง — ดักการ re-add โดยพลาด
+
+  int64  id       = 1;
+  string name     = 2;
+  bool   verified = 4;
+}
+```
+
+ตอนนี้ compiler เป็นตาข่ายกันตกให้คุณ: ความพยายามในอนาคตที่จะ reuse number `3` หรือชื่อ `email` จะ build ไม่ผ่าน เครื่องมืออย่าง **buf** ไปไกลกว่านั้นอีก มันตรวจจับ breaking change อัตโนมัติใน CI ได้ด้วยการเทียบ `.proto` ของคุณกับ version ที่ publish ไปก่อนหน้า — เปลี่ยน "ฉันเพิ่งทำ client พังหมดเลยหรือเปล่า?" ให้เป็น pull request ที่ fail แทน incident ตอนตีสอง
+
+## version ที่ package ไม่ใช่ด้วยการทำพัง
+
+เมื่อคุณจำเป็นต้องทำ change ที่เข้ากันไม่ได้จริง ๆ อย่าไปแก้ message เดิม ให้ publish package version ใหม่ (`user.v2`) ควบคู่กับ `user.v1` แล้วค่อย ๆ migrate client นี่คือเหตุผลที่คุณเห็น `package user.v1;` อยู่ทุกที่ — version ถูกฝังไว้ใน type path เพื่อให้ v1 กับ v2 อยู่ด้วยกันได้
+
+<Callout title="สรุปหนึ่งบรรทัด">
+compatibility ของ protobuf ตั้งอยู่บนข้อเท็จจริงเดียว: **number ระบุ field ไม่ใช่ชื่อ** การเพิ่ม field, ลบแล้ว reserve และ rename ปลอดภัย ส่วนการ reuse หรือ renumber tag ทำข้อมูลเสียแบบเงียบ ๆ ลบ field → `reserved` number ของมัน; ต้องการ breaking change → ปล่อย package version ใหม่ และให้เครื่องมืออย่าง buf บังคับใน CI
+</Callout>
+
+export const quizEvolve = [
+  {
+    q: 'อะไรที่ทำให้ protobuf schema evolution เป็นไปได้ตั้งแต่แรก?',
+    options: [
+      'client ทุกตัว re-download schema ทุกครั้งที่เรียก',
+      'field ถูกระบุด้วย number ดังนั้น field ที่ไม่รู้จักถูกข้าม และตัวที่หายไปอ่านเป็น default',
+      'protobuf แปลงทุกอย่างเป็น JSON ก่อน',
+      'gRPC block client เก่าอัตโนมัติ',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'change ไหนที่การันตีว่าปลอดภัย?',
+    options: [
+      'reuse field number ที่ลบไปกับ field ใหม่',
+      'เพิ่ม field ใหม่ด้วย number ที่สดใหม่ไม่เคยใช้',
+      'เปลี่ยน field จาก int32 เป็น string',
+      'renumber field ที่มีอยู่',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม reuse field number ที่ลบไปแล้วถึงอันตรายนัก?',
+    options: [
+      'มันทำให้ encode ช้าลง',
+      'client เก่ายังส่ง number นั้น bytes ของมันเลยถูก decode เป็น field ใหม่ — ข้อมูลเสียแบบเงียบ',
+      'compiler ปฏิเสธการ build',
+      'มันพังแค่ documentation',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เมื่อต้องทำ change ที่เข้ากันไม่ได้จริง ๆ วิธีที่แนะนำคืออะไร?',
+    options: [
+      'renumber field ในที่เดิม',
+      'publish package version ใหม่ (เช่น user.v2) ควบคู่กับตัวเก่า',
+      'ลบ .proto เก่าทิ้ง',
+      'เปลี่ยนทั้ง service ไปใช้ JSON',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/evolving-schemas" questions={quizEvolve} />
+
+<ProgressTracker client:visible id="protocol-buffers/evolving-schemas" />

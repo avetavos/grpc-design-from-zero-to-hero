@@ -1,0 +1,151 @@
+---
+title: 'Load Balancing & Health'
+description: 'Why a naive L4 balancer breaks gRPC, how client-side load balancing spreads calls across backends, and the health checking protocol that feeds it.'
+sidebar:
+  order: 5
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The problem: one connection, many calls
+
+Everything that makes gRPC fast also makes load balancing tricky. A gRPC client opens **one long-lived HTTP/2 connection** and multiplexes every call over it. That's great for latency — but a traditional **L4 (TCP) load balancer** balances *connections*, not requests. It picks a backend once, when the connection opens, and then every call rides that single connection to that single backend.
+
+<Mermaid title="An L4 balancer pins all calls to one backend; client-side LB spreads them" code={lbDiagram} />
+
+export const lbDiagram = `flowchart TB
+  subgraph l4["L4 (TCP) balancer — pins the connection"]
+    c1["client"] -->|one connection| p["L4 LB"]
+    p --> b1["backend A\n(gets everything)"]
+    b2["backend B\n(idle)"]
+    b3["backend C\n(idle)"]
+  end
+  subgraph csl["Client-side LB — spreads calls"]
+    c2["client"] --> r["resolver + policy"]
+    r --> ba["backend A"]
+    r --> bb["backend B"]
+    r --> bc["backend C"]
+  end`;
+
+The result: one backend gets hammered while the others sit idle, and autoscaling misfires. This is the single most common gRPC scaling surprise.
+
+## Two ways to balance gRPC
+
+There are two correct approaches:
+
+- **L7 (application-aware) proxy** — a proxy that speaks HTTP/2 and gRPC (Envoy, Linkerd, or a gRPC-aware cloud LB) balances individual *calls*, not connections. The client just talks to the proxy.
+- **Client-side load balancing** — the client itself knows about all the backends and spreads calls across them. It uses a **name resolver** (to discover the set of backend addresses, e.g. via DNS or xDS) and a **load-balancing policy** (like `round_robin`) to choose a **subchannel** — one connection per backend — for each call.
+
+Client-side LB is idiomatic in gRPC because it avoids an extra network hop. The classic setup: resolve `dns:///my-service:50051` to several IPs and apply `round_robin`.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, _ := grpc.NewClient(
+        "dns:///my-service:50051",
+        grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
+        grpc.WithTransportCredentials(insecure.NewCredentials()),
+    )
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel(
+        "dns:///my-service:50051",
+        options=[("grpc.lb_policy_name", "round_robin")],
+    )
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const client = new MyServiceClient(
+      'dns:///my-service:50051',
+      credentials.createInsecure(),
+      { 'grpc.service_config': JSON.stringify({
+          loadBalancingConfig: [{ round_robin: {} }],
+        }) },
+    );
+    ```
+  </TabItem>
+</Tabs>
+
+## Health checking
+
+Balancing across backends is only useful if you route away from *unhealthy* ones. gRPC defines a standard **Health Checking Protocol** — a tiny service every server can expose:
+
+```proto
+syntax = "proto3";
+package grpc.health.v1;
+
+message HealthCheckRequest { string service = 1; }
+message HealthCheckResponse {
+  enum ServingStatus { UNKNOWN = 0; SERVING = 1; NOT_SERVING = 2; }
+  ServingStatus status = 1;
+}
+
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Watch(HealthCheckRequest) returns (stream HealthCheckResponse);
+}
+```
+
+Load balancers and orchestrators (Kubernetes, Envoy) call `Check` — or subscribe with `Watch` — and stop routing to a backend that reports `NOT_SERVING`. Because it's a standard proto, tooling like `grpc_health_probe` works with any language's server.
+
+## Keepalive
+
+Long-lived connections can silently die (an idle NAT drops them, a backend disappears). **Keepalive** pings — small HTTP/2 PINGs on an interval — detect a dead connection quickly so the client can reconnect and re-resolve, rather than sending calls into a black hole. Tune them carefully: too aggressive and servers may reject you for pinging too often.
+
+<Callout title="The one-line takeaway">
+gRPC holds one multiplexed connection, so a naive **L4 balancer pins all calls to one backend**. Fix it with an **L7 gRPC-aware proxy** or **client-side load balancing** (resolver + policy like `round_robin` + one subchannel per backend). Feed it the standard **Health Checking Protocol** so traffic avoids unhealthy servers, and use **keepalive** to notice dead connections fast.
+</Callout>
+
+export const quizLb = [
+  {
+    q: 'Why does a plain L4 (TCP) load balancer distribute gRPC traffic poorly?',
+    options: [
+      'gRPC does not use TCP',
+      'It balances connections, and gRPC uses one long-lived connection — so all calls pin to one backend',
+      'It cannot read protobuf',
+      'gRPC forbids load balancers',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What two pieces make up client-side load balancing?',
+    options: [
+      'A database and a cache',
+      'A name resolver (finds backends) and a load-balancing policy (chooses one per call)',
+      'TLS and a token',
+      'A header and a trailer',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What is the gRPC Health Checking Protocol for?',
+    options: [
+      'Encrypting the channel',
+      'A standard service reporting SERVING / NOT_SERVING so balancers route away from unhealthy backends',
+      'Generating stubs',
+      'Compressing metadata',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What problem do keepalive pings solve?',
+    options: [
+      'They make protobuf smaller',
+      'They detect silently-dead long-lived connections so the client can reconnect',
+      'They authenticate the user',
+      'They balance load across backends',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="production/load-balancing-and-health" questions={quizLb} />
+
+<ProgressTracker client:visible id="production/load-balancing-and-health" />

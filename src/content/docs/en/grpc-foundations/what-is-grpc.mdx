@@ -1,0 +1,167 @@
+---
+title: 'What Is gRPC?'
+description: 'The RPC mental model, the .proto contract, and the generate-then-call workflow that turns a schema into a typed client and server.'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## Remote Procedure Call
+
+**gRPC** stands for *gRPC Remote Procedure Call* (yes, it's recursive). The important half is **RPC**: the idea that calling code on another machine should look like calling a normal function.
+
+Without RPC, a service-to-service call means: build a URL, choose a verb, serialize a body to JSON, send an HTTP request, check the status code, parse the response, and hope both sides agreed on the shape. RPC collapses all of that into one line:
+
+```text
+user = userService.GetUser(id: 42)
+```
+
+You call a method. You get a typed result. The transport, serialization, and error handling are generated for you and hidden behind the call.
+
+## The contract comes first
+
+The thing that makes this possible is a **contract** written before any implementation — a `.proto` file. It declares the messages (the data) and the service (the methods):
+
+```proto
+syntax = "proto3";
+package user.v1;
+
+message GetUserRequest {
+  int64 id = 1;
+}
+
+message User {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (User);
+}
+```
+
+This file is the single source of truth. It is language-neutral: the same `.proto` produces a Go server, a Python client, and a Node service that all interoperate perfectly, because they were all generated from the same declaration.
+
+## Generate, then call
+
+The workflow has three steps, and only the middle one is code you write:
+
+<Mermaid title="From contract to running call" code={workflowDiagram} />
+
+export const workflowDiagram = `flowchart LR
+  proto[".proto contract"] -->|protoc| stubs["generated stubs\n(client + server)"]
+  stubs --> impl["you implement\nthe server methods"]
+  impl --> run["client calls\nstub.GetUser(42)"]
+  run -->|HTTP/2 + protobuf| server["server runs\nGetUser, returns User"]
+  server --> run`;
+
+1. **Write the `.proto`** and run `protoc` (the protobuf compiler) to generate typed stubs.
+2. **Implement the server** — fill in the body of `GetUser`.
+3. **Call from the client** — invoke the generated stub method; the request is serialized to protobuf, sent over HTTP/2, and the typed response comes back.
+
+Here is the client call in three languages. Notice how little there is: no URL, no JSON, no status-code checking — just a method call.
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    conn, _ := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    defer conn.Close()
+    client := userv1.NewUserServiceClient(conn)
+
+    user, err := client.GetUser(ctx, &userv1.GetUserRequest{Id: 42})
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(user.Name) // typed field, no JSON parsing
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    channel = grpc.insecure_channel("localhost:50051")
+    client = user_pb2_grpc.UserServiceStub(channel)
+
+    user = client.GetUser(user_pb2.GetUserRequest(id=42))
+    print(user.name)  # typed field, no JSON parsing
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    const client = new UserServiceClient(
+      'localhost:50051',
+      credentials.createInsecure(),
+    );
+
+    client.getUser({ id: 42 }, (err, user) => {
+      if (err) throw err;
+      console.log(user.name); // typed field, no JSON parsing
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## What gRPC gives you for free
+
+Because everything flows from the contract, the framework can hand you a lot:
+
+- **Type safety across the wire** — the client and server can't disagree about field names or types; they're generated from the same schema.
+- **Efficient binary encoding** — protobuf is smaller and faster to parse than JSON.
+- **Streaming** — the same model extends to sending many messages in either direction (a whole later module).
+- **Cross-language interop** — 11+ official languages, all speaking the same protocol.
+- **Built-in features** — deadlines, cancellation, metadata, interceptors, and load balancing come with the framework, not as things you reinvent.
+
+<Callout title="The one-line takeaway">
+gRPC is RPC done contract-first: you declare messages and methods in a `.proto`, generate typed client and server code, and then a network call looks like `client.GetUser(42)`. The schema is the source of truth — which is what makes the type safety, the codegen, and the cross-language interop possible.
+</Callout>
+
+export const quizWhat = [
+  {
+    q: 'What does the "RPC" in gRPC mean for how you write code?',
+    options: [
+      'You build URLs and parse JSON by hand',
+      'Calling code on another machine looks like calling a local function',
+      'You must write raw HTTP/2 frames',
+      'You replicate a database across nodes',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'In the gRPC workflow, what is the single source of truth?',
+    options: [
+      'The client code',
+      'The server code',
+      'The .proto contract',
+      'The load balancer config',
+    ],
+    answer: 2,
+  },
+  {
+    q: 'Why can a Go server and a Python client interoperate perfectly in gRPC?',
+    options: [
+      'They share a runtime',
+      'They were both generated from the same .proto contract',
+      'Python compiles to Go',
+      'They both use JSON internally',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Which of these does gRPC give you without extra work?',
+    options: [
+      'Automatic database indexes',
+      'Type safety across the wire, binary encoding, deadlines, and streaming',
+      'Server-side HTML rendering',
+      'A built-in message broker',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/what-is-grpc" questions={quizWhat} />
+
+<ProgressTracker client:visible id="grpc-foundations/what-is-grpc" />

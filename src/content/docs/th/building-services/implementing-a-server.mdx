@@ -1,0 +1,161 @@
+---
+title: 'Implementing a Server'
+description: 'เติม handler ที่ generate มา, register service บน gRPC server และเริ่ม listen — unary server ครบชุดใน 3 ภาษา'
+sidebar:
+  order: 3
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## สามขั้นตอน เหมือนเดิมทุกครั้ง
+
+codegen ให้ **server interface** ที่มี method หนึ่งตัวต่อ `rpc` มาแล้ว การ implement server มี 3 ขั้นตอนเหมือนเดิมเสมอ:
+
+1. **Implement handler** — เขียน body ของ `GetUser`: รับ request คืน response (หรือ error)
+2. **Register** implementation ของคุณเข้ากับ gRPC server object
+3. **Serve** — bind กับ port แล้วเริ่มรับ HTTP/2 connection
+
+<Mermaid title="request ไปถึง handler ของคุณอย่างไร" code={serverDiagram} />
+
+export const serverDiagram = `flowchart LR
+  client["client stub"] -->|GetUserRequest| server["gRPC server\n(listening on :50051)"]
+  server -->|dispatch by method| handler["your GetUser handler"]
+  handler -->|User| server
+  server -->|response| client`;
+
+gRPC server จัดการเรื่อง HTTP/2, การ decode protobuf และการ dispatch method ให้ทั้งหมด handler ของคุณเห็นแค่ typed request แล้วคืน typed response
+
+## unary server ครบชุด
+
+นี่คือทั้งหมด — handler, registration และ serve — สำหรับ `UserService.GetUser`:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```go
+    type server struct {
+        userv1.UnimplementedUserServiceServer // forward-compat embedding
+    }
+
+    // GetUser is the handler: request in, response out.
+    func (s *server) GetUser(ctx context.Context, req *userv1.GetUserRequest) (*userv1.User, error) {
+        // (normally you'd look this up in a database)
+        return &userv1.User{
+            Id:    req.Id,
+            Name:  "Ada Lovelace",
+            Email: "ada@example.com",
+        }, nil
+    }
+
+    func main() {
+        lis, _ := net.Listen("tcp", ":50051")
+        s := grpc.NewServer()
+        userv1.RegisterUserServiceServer(s, &server{}) // register
+        log.Println("listening on :50051")
+        s.Serve(lis) // serve
+    }
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```python
+    class UserService(user_pb2_grpc.UserServiceServicer):
+        # GetUser is the handler: request in, response out.
+        def GetUser(self, request, context):
+            return user_pb2.User(
+                id=request.id,
+                name="Ada Lovelace",
+                email="ada@example.com",
+            )
+
+    def serve():
+        server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        user_pb2_grpc.add_UserServiceServicer_to_server(UserService(), server)  # register
+        server.add_insecure_port("[::]:50051")
+        server.start()  # serve
+        print("listening on :50051")
+        server.wait_for_termination()
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```ts
+    // GetUser is the handler: request in, callback out.
+    const userService = {
+      getUser(call, callback) {
+        callback(null, {
+          id: call.request.id,
+          name: 'Ada Lovelace',
+          email: 'ada@example.com',
+        });
+      },
+    };
+
+    const server = new Server();
+    server.addService(UserServiceService, userService); // register
+    server.bindAsync('0.0.0.0:50051', ServerCredentials.createInsecure(), () => {
+      console.log('listening on :50051'); // serve
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+## คืน error ไม่ใช่ throw exception
+
+เมื่อมีอะไรผิดพลาด คุณจะไม่ throw exception มั่ว ๆ — แต่คืน gRPC **status** user ที่หาไม่เจอคือ `NOT_FOUND`, input ที่ผิดคือ `INVALID_ARGUMENT` error model มีบทเรียนของตัวเองในโมดูล Service Definition นิสัยสำคัญที่ควรเริ่มตอนนี้คือ **map ความล้มเหลวไปเป็น status code อย่างตั้งใจ** เพราะ status นั้นคือสิ่งที่ `err` ฝั่ง client จะได้รับ
+
+## handler เดียว หลาย call พร้อมกัน
+
+เพราะ server ทำงานบน HTTP/2 multiplexing หลาย call จึงวิ่งเข้า handler ของคุณพร้อมกันบน connection เดียวกัน ใน Go แต่ละ call รันใน goroutine ของตัวเอง; ใน Python มี thread pool คอย serve; ใน Node event loop สลับกันจัดการ นั่นแปลว่า **handler ของคุณต้องรันพร้อมกันได้อย่างปลอดภัย** — ห้ามมี shared mutable state ที่ไม่ได้ป้องกันด้วย synchronization
+
+<Callout title="The one-line takeaway">
+gRPC server คือ: implement handler ที่ generate มา (typed request เข้า, typed response หรือ status error ออก), register มันบน server object แล้ว serve บน port framework จัดการ HTTP/2, การ decode และ dispatch ให้ — คุณแค่เขียน body ของ method และเขียนให้ปลอดภัยต่อ concurrency
+</Callout>
+
+export const quizServer = [
+  {
+    q: 'implement gRPC server มี 3 ขั้นตอนอะไรบ้าง?',
+    options: [
+      'parse, compile, link',
+      'implement handler, register service, serve บน port',
+      'connect, authenticate, disconnect',
+      'marshal, send, unmarshal',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'handler ของคุณรับและคืนอะไร?',
+    options: [
+      'HTTP/2 frame ดิบ ๆ',
+      'typed request; คืน typed response หรือ status error',
+      'JSON string',
+      'file path',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'handler ควรบอกว่าหา user ไม่เจออย่างไร?',
+    options: [
+      'throw exception มั่ว ๆ',
+      'คืน status NOT_FOUND',
+      'คืน null แล้วภาวนา',
+      'ปิด connection',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไม gRPC handler ต้องปลอดภัยต่อ concurrency?',
+    options: [
+      'เพราะ protobuf เป็น single-thread',
+      'เพราะ HTTP/2 multiplexing ทำให้หลาย call วิ่งผ่านมันพร้อมกัน',
+      'เพราะ client retry ให้อัตโนมัติ',
+      'ไม่ต้อง — handler รันทีละตัวเสมอ',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/implementing-a-server" questions={quizServer} />
+
+<ProgressTracker client:visible id="building-services/implementing-a-server" />

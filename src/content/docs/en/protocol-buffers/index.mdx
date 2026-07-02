@@ -1,0 +1,81 @@
+---
+title: 'Protocol Buffers'
+description: 'The schema language behind gRPC — messages and field numbers, scalar types, enums, oneof, maps, well-known types, and how to evolve a schema without breaking anyone.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The language your API is written in
+
+Everything in gRPC starts from a `.proto` file, and that file is written in **Protocol Buffers**. Before you can design services and RPC methods, you need fluency in the building block they carry: the **message**.
+
+This module is about protobuf the *schema language* — how to model your data precisely, and how to shape it so it can grow for years without breaking the clients you already shipped.
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| Messages & Fields | Message syntax and why every field carries a **number**, not just a name |
+| Scalar Types & Defaults | The built-in types, proto3 default values, and the `optional` presence trap |
+| Enums, Nested & oneof | Enumerations (with the zero-value rule), nesting, and mutually-exclusive fields |
+| Repeated, Maps & Well-Known | Lists, key/value maps, and the standard library of `google.protobuf` types |
+| Evolving Schemas | The rules that let a schema change safely — and the ones that break clients |
+
+## Why the schema deserves its own module
+
+A protobuf message is deceptively simple — a few typed fields with numbers. But those numbers, defaults, and evolution rules are exactly where real systems get into trouble:
+
+<Mermaid title="The schema decisions this module makes safe" code={overviewDiagram} />
+
+export const overviewDiagram = `flowchart TB
+  msg["message design\n(fields + numbers)"] --> types["type & default choices"]
+  types --> evolve["schema evolution\n(add / reserve / never reuse)"]
+  evolve --> safe["clients keep working\nacross versions"]`;
+
+Get the field numbers and evolution rules right early, and your API can add features for years without a breaking change. Get them wrong, and you're stuck with a versioning headache the first time a message needs to grow.
+
+<Callout title="The mindset for this module">
+A `.proto` message is a **long-lived contract**, not a throwaway struct. The name of a field is for humans; the **number** is what actually travels and what you can never casually change. Design as if every message will still be in production in three years — because it probably will be.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What is the fundamental building block this module focuses on?',
+    options: [
+      'The service',
+      'The message',
+      'The channel',
+      'The interceptor',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why does schema evolution deserve careful attention?',
+    options: [
+      'Because protobuf files must be under 1KB',
+      'Because field numbers and evolution rules decide whether old clients keep working',
+      'Because enums are not allowed to change',
+      'Because gRPC re-sends the schema on every call',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'How should you treat a .proto message?',
+    options: [
+      'As a throwaway struct you can rewrite anytime',
+      'As a long-lived contract that must grow without breaking clients',
+      'As documentation only, with no runtime effect',
+      'As a cache key',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="protocol-buffers/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="protocol-buffers/index" />

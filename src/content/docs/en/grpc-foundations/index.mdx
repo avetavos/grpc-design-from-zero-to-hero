@@ -1,0 +1,82 @@
+---
+title: 'gRPC Foundations'
+description: 'What gRPC is, the RPC mental model, why it rides on HTTP/2, and how it compares to REST — the groundwork for everything that follows.'
+sidebar:
+  order: 1
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The idea in one sentence
+
+**gRPC lets one program call a function in another program — running on another machine — as if it were a local call.** You define the functions and their data once, in a `.proto` file, and gRPC generates the client and server code that makes the network disappear.
+
+That is the whole promise: you write `stub.GetUser(id)`, and a request travels across the network, runs on a server, and returns a typed result — with no URLs, no JSON parsing, and no hand-written HTTP.
+
+## What this module covers
+
+| Lesson | What you'll learn |
+|--------|-------------------|
+| What is gRPC? | The RPC model, the `.proto` contract, and the generate-then-call workflow |
+| gRPC vs REST | Where each fits, the real trade-offs, and honest guidance on choosing |
+| HTTP/2 & gRPC | Why gRPC needs HTTP/2 — multiplexing, streams, and binary framing |
+| Protocol Buffers intro | The contract-first idea and why a binary schema beats ad-hoc JSON |
+
+## Why start here
+
+Every later topic — streaming, deadlines, interceptors, load balancing — is a consequence of two design decisions gRPC made up front:
+
+<Mermaid title="The two foundations everything else builds on" code={foundationDiagram} />
+
+export const foundationDiagram = `flowchart TB
+  proto["Protocol Buffers\n(contract-first schema)"] --> gen["Generated stubs\n(typed client + server)"]
+  http2["HTTP/2\n(multiplexed, streaming, binary)"] --> transport["One connection,\nmany concurrent calls"]
+  gen --> grpc["gRPC"]
+  transport --> grpc
+  grpc --> features["streaming · deadlines ·\ninterceptors · load balancing"]`;
+
+Understand those two — a **binary contract** and a **multiplexed transport** — and the rest of gRPC stops feeling like magic and starts feeling like the obvious result.
+
+<Callout title="The mental shift">
+REST makes you think in **resources and URLs** (`GET /users/42`). gRPC makes you think in **methods and messages** (`GetUser(GetUserRequest)`). Neither is universally better — but the method-call model is why gRPC feels natural for service-to-service calls, and why the tooling can generate so much for you.
+</Callout>
+
+export const quizIndex = [
+  {
+    q: 'What is the core idea of gRPC?',
+    options: [
+      'A faster way to serve HTML pages',
+      'Calling a function in another process/machine as if it were local, from a shared contract',
+      'A database replication protocol',
+      'A JSON schema validator',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What are the two foundational design choices gRPC is built on?',
+    options: [
+      'XML and SOAP',
+      'A binary contract (Protocol Buffers) and a multiplexed transport (HTTP/2)',
+      'REST verbs and status codes',
+      'WebSockets and JSON',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'In gRPC you primarily think in terms of:',
+    options: [
+      'Resources and URLs',
+      'Methods and messages',
+      'Files and folders',
+      'Tables and rows',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="grpc-foundations/index" questions={quizIndex} />
+
+<ProgressTracker client:visible id="grpc-foundations/index" />

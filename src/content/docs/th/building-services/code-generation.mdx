@@ -1,0 +1,148 @@
+---
+title: 'Code Generation'
+description: 'protoc กับ plugin ของแต่ละภาษาเปลี่ยน .proto เป็น typed code ได้อย่างไร, generate อะไรออกมาบ้าง และทำไม buf คือวิธีที่ทันสมัยกว่า'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## compiler กับ plugin ของมัน
+
+ไฟล์ `.proto` ตัวเดียวทำอะไรไม่ได้ คุณต้องรันมันผ่าน **`protoc`** ซึ่งเป็น compiler ของ Protocol Buffers ที่ parse schema แล้วส่งต่อให้ **plugin** ที่ emit code สำหรับภาษาใดภาษาหนึ่ง ตัว `protoc` เองไม่รู้จัก Go หรือ Python เลย — plugin ต่างหากที่รู้
+
+สำหรับ gRPC ปกติจะมี output **สอง** ส่วน:
+
+- **Message code** — struct/class ของ `User`, `GetUserRequest` ฯลฯ (มาจาก plugin protobuf พื้นฐาน)
+- **Service code** — client stub และ server interface (มาจาก plugin ของ gRPC)
+
+<Mermaid title="protoc parse; plugin emit code ของแต่ละภาษา" code={genDiagram} />
+
+export const genDiagram = `flowchart LR
+  proto["user.proto"] --> protoc["protoc\n(parses schema)"]
+  protoc --> base["protobuf plugin\n→ message types"]
+  protoc --> grpc["gRPC plugin\n→ stub + server interface"]`;
+
+## รันแยกตามภาษา
+
+แต่ละภาษามี plugin คู่ของตัวเอง นี่คือคำสั่งทั่วไปของแต่ละ ecosystem:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```bash
+    # install the two plugins once
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+    protoc --go_out=. --go_opt=paths=source_relative \
+           --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+           user/v1/user.proto
+    # → user.pb.go (messages) + user_grpc.pb.go (stub + server interface)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```bash
+    pip install grpcio-tools
+
+    python -m grpc_tools.protoc -I. \
+           --python_out=. --grpc_python_out=. \
+           user/v1/user.proto
+    # → user_pb2.py (messages) + user_pb2_grpc.py (stub + servicer)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```bash
+    npm install --save-dev ts-proto @grpc/grpc-js grpc-tools
+
+    protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+           --ts_proto_out=. --ts_proto_opt=outputServices=grpc-js \
+           user/v1/user.proto
+    # → user.ts (typed messages + client + server interfaces)
+    ```
+  </TabItem>
+</Tabs>
+
+## สิ่งที่ได้ออกมาจริง ๆ
+
+ไม่ว่าภาษาไหน generated code จะมีของ 3 อย่างเดิมเสมอ:
+
+1. **Message type** — object ที่มี type สำหรับทุก `message` พร้อม getter/setter หรือ field และ logic การ serialize ฝังมาให้แล้ว
+2. **Client stub** — class ที่มี method หนึ่งตัวต่อ `rpc` เพื่อให้ client แค่เรียก `stub.GetUser(req)`
+3. **Server interface** — base แบบ abstract (Go interface, Python servicer, Node service definition) ที่มี method หนึ่งตัวต่อ `rpc` ให้คุณ implement
+
+คุณจะไม่แก้ไฟล์ที่ generate มา เมื่อ `.proto` เปลี่ยน คุณ generate ใหม่
+
+## ใช้ buf แทน protoc ดิบ ๆ
+
+คำสั่ง `protoc` ดิบ ๆ จะยุ่งเร็วมาก — path ของ plugin, include path, option ของ output คูณด้วยจำนวนภาษา **`buf`** คือเครื่องมือยุคใหม่ที่มาแทน คุณประกาศ input กับ output ใน config file เล็ก ๆ แล้วรันคำสั่งเดียว:
+
+```yaml
+# buf.gen.yaml
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+  - remote: buf.build/grpc/go
+    out: gen
+```
+
+```bash
+buf generate
+```
+
+`buf` ยัง lint schema และตรวจจับ breaking change ให้ด้วย (เจาะลึกในโมดูล Ecosystem) — จึงเป็นเหตุผลที่ทีมส่วนใหญ่เลือกใช้เป็นมาตรฐาน
+
+<Callout title="The one-line takeaway">
+`protoc` parse `.proto` แล้วมอบงานต่อให้ plugin ของแต่ละภาษาที่ emit ของ 3 อย่าง: message type, client stub และ server interface คุณ implement server และเรียก stub — โดยไม่แตะ generated code เลย ส่วน `buf` ห่อความยุ่งทั้งหมดให้เหลือ `buf generate` ที่ขับด้วย config เดียว
+</Callout>
+
+export const quizGen = [
+  {
+    q: 'protoc กับ plugin ของมันมีบทบาทต่างกันอย่างไร?',
+    options: [
+      'protoc emit Go; plugin emit Python',
+      'protoc parse schema; plugin ของแต่ละภาษา emit code จริง',
+      'protoc รัน server; plugin รัน client',
+      'มันคือสิ่งเดียวกัน',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'code generation ของ gRPC ผลิต artifact 3 อย่างอะไรบ้าง?',
+    options: [
+      'database, cache และ queue',
+      'message type, client stub และ server interface',
+      'HTML, CSS และ JS',
+      '.proto สามชุด',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'เมื่อ .proto เปลี่ยน คุณควรทำอะไร?',
+    options: [
+      'แก้ไฟล์ที่ generate มาด้วยมือ',
+      'generate code ใหม่',
+      'restart load balancer',
+      'ไม่ต้องทำอะไร — มัน update ตัวเองตอน runtime',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'ทำไมทีมส่วนใหญ่ถึงใช้ buf แทนคำสั่ง protoc ดิบ ๆ?',
+    options: [
+      'มันทำให้ protobuf อ่านออกด้วยตาเปล่า',
+      'มันแทนคำสั่งหลาย plugin ที่เปราะด้วยคำสั่งเดียวที่ขับด้วย config พร้อม lint และตรวจ breaking change',
+      'มันตัดความจำเป็นของ .proto ออกไป',
+      'มันใช้ได้กับ Go เท่านั้น',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/code-generation" questions={quizGen} />
+
+<ProgressTracker client:visible id="building-services/code-generation" />

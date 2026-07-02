@@ -1,0 +1,97 @@
+---
+title: 'Flow Control & Backpressure'
+description: 'HTTP/2 flow control สร้าง backpressure อย่างไร, เกิดอะไรขึ้นเมื่อ producer ที่เร็วเจอ consumer ที่ช้า และทำไม buffering แบบไม่จำกัดคืออันตรายตัวจริง'
+sidebar:
+  order: 5
+---
+
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## ปัญหาที่ stream สร้างขึ้น
+
+stream ปล่อยให้ producer ส่งเร็วเท่าที่ทำได้ แต่ถ้า consumer อ่านช้าล่ะ? ถ้าไม่มีเบรก ฝั่งที่เร็วจะกอง message ไว้ใน memory เร็วกว่าที่ฝั่งช้าจะระบายออก — จนกระทั่งบางอย่าง memory หมดแล้วล้ม
+
+เบรกนั้นคือ **flow control** และแรงที่มันดันกลับไปที่ producer คือ **backpressure**
+
+## HTTP/2 flow control แบบได้มาฟรี
+
+เพราะ gRPC วิ่งบน HTTP/2 มันจึงได้ flow control ของ HTTP/2 มาอัตโนมัติ แต่ละฝั่งประกาศ **window** — จำนวน byte ที่ตอนนี้ยินดีรับ เมื่อ data มาถึงและถูกบริโภค ผู้รับก็เติม window; ถ้าผู้รับหยุดบริโภค window ก็ระบายจนเป็นศูนย์แล้วผู้ส่งต้องหยุด
+
+<Mermaid title="window เต็มหยุด producer จนกว่า consumer จะตามทัน" code={fcDiagram} />
+
+export const fcDiagram = `flowchart LR
+  prod["producer ที่เร็ว"] -->|writes| win["flow-control window"]
+  win -->|reads| cons["consumer ที่ช้า"]
+  win -. "window ว่าง →\nSend block" .-> prod
+  cons -. "consume →\nเติม window" .-> win`;
+
+ผลก็คือ: เมื่อคุณเรียก `Send` แล้ว window เต็ม `Send` จะ **block** (หรือใน callback API จะส่งสัญญาณ "not ready"/`drain`) จนกว่า consumer จะตามทัน transport กำลังบอก producer ว่า "ช้าลงหน่อย" นั่นคือ backpressure ที่ทำงานถูกต้อง — และมันเกิดขึ้นโดยที่คุณไม่ต้องเขียนอะไรเลย
+
+## จุดที่มันพัง: การทำลาย backpressure ของตัวเอง
+
+อันตรายไม่ใช่ HTTP/2 — มัน handle flow control ได้ดี อันตรายคือ code ที่ **buffer อ้อม** backpressure แล้วดึงปัญหา memory ไม่จำกัดกลับมา:
+
+- **อ่านทุกอย่างเข้า slice/list ก่อนประมวลผล** ถ้า receive loop ของคุณ append ทุก message เข้า list ใน memory คุณเปลี่ยน stream ที่มีขอบเขตให้กลายเป็น memory ไม่จำกัด ประมวลผลแต่ละ message ตอนที่มันมาถึง
+- **send loop ที่ไม่เคย block** ใน runtime แบบ callback (Node) การเมิน return value ของ `write()` / event `drain` ทำให้คุณ queue data ไม่จำกัดไว้ใน buffer ภายในของ library เคารพสัญญาณ "รอก่อน"
+- **ไม่อ่านขณะที่เขียน** บน bidi stream ถ้าคุณส่งอย่างเดียวไม่เคยรับ flow-control acknowledgement ของ peer จะกอง แล้วทั้งสองฝั่ง deadlock ได้ รัน receive loop พร้อมกันเสมอ
+
+## แนวทางการออกแบบ
+
+- **ประมวลผล อย่าสะสม** จัดการแต่ละ message ที่ stream มาแล้วปล่อยไป อย่าเก็บทั้งหมดไว้ก่อน
+- **ให้ backpressure ส่งถึงต้นทาง** ถ้าคุณ relay stream อยู่ (อ่านจาก DB ส่งไป client) ให้ `Send` ที่ block หยุดการอ่านจาก DB ด้วย แล้ว consumer ที่ช้าจะ throttle ต้นทางที่เร็วเองโดยธรรมชาติ
+- **จำกัดทุกอย่างที่ stream ไม่ได้** จำกัดจำนวนและขนาด message เพื่อกัน peer ที่ทำตัวไม่ดีบังคับงานไม่จำกัด
+- **รู้ว่าเมื่อไร**ไม่**ควร stream** ถ้า consumer ที่ช้าจะบังคับให้ server ถือ state หรือ memory ไว้นาน stream อาจกลายเป็นภาระ บางครั้ง unary call เล็ก ๆ หลายอัน (retry และ rebalance ได้อิสระ) เป็นดีไซน์ที่ปลอดภัยกว่า stream ยาว 1 อัน — trade-off เดียวกับใน intro ของโมดูลนี้
+
+<Callout title="สรุปหนึ่งบรรทัด">
+gRPC ได้ flow control ฟรีจาก HTTP/2: window ที่เต็มทำให้ `Send` block ซึ่งคือ backpressure ที่บอก producer ให้ช้าลง โหมดพังคือ code ของคุณเองที่ buffer อ้อมมัน — อ่านทั้ง stream เข้า memory, เมิน `drain` หรือไม่อ่านขณะเขียน ประมวลผลแต่ละ message ตอนที่มันมาถึง และให้ backpressure ส่งย้อนไปถึงต้นทาง
+</Callout>
+
+export const quizFC = [
+  {
+    q: 'backpressure ใน gRPC stream คืออะไร?',
+    options: [
+      'server ปฏิเสธ connection',
+      'transport ส่งสัญญาณให้ producer ที่เร็วช้าลงเมื่อ consumer ตามไม่ทัน',
+      'การ compress message อัตโนมัติ',
+      'การ retry message ที่ fail',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'flow control ของ gRPC มาจากไหน?',
+    options: [
+      'buffer ของ gRPC ที่คุณ config เอง',
+      'flow-control window ต่อ stream ของ HTTP/2 ที่ได้มาอัตโนมัติ',
+      'TCP buffer ของ OS อย่างเดียว',
+      'ไฟล์ .proto',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'วิธีที่ developer เผลอทำลาย backpressure บ่อยที่สุดคืออะไร?',
+    options: [
+      'การใช้ TLS',
+      'อ่านทั้ง stream เข้า list ใน memory แทนที่จะประมวลผลแต่ละ message ตอนที่มันมาถึง',
+      'การตั้ง deadline',
+      'การใช้ server streaming',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'บน bidirectional stream ทำไมต้องอ่านขณะที่เขียน?',
+    options: [
+      'เพื่อลด latency อย่างเดียว',
+      'ถ้าส่งอย่างเดียวไม่เคยรับ flow-control acknowledgement จะกองแล้วทั้งสองฝั่ง deadlock ได้',
+      'เพราะการเขียนถูกปิดจนกว่าจะอ่าน',
+      'เพื่อให้ TLS session ยังอยู่',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="streaming/flow-control-backpressure" questions={quizFC} />
+
+<ProgressTracker client:visible id="streaming/flow-control-backpressure" />

@@ -1,0 +1,148 @@
+---
+title: 'Code Generation'
+description: 'How protoc and language plugins turn a .proto into typed code, what artifacts you get, and why buf is the modern way to run it.'
+sidebar:
+  order: 2
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import Mermaid from '../../../../components/Mermaid.astro';
+import Callout from '../../../../components/Callout.astro';
+import Quiz from '../../../../components/Quiz.tsx';
+import ProgressTracker from '../../../../components/ProgressTracker.tsx';
+
+## The compiler and its plugins
+
+A `.proto` file does nothing on its own. You run it through **`protoc`**, the Protocol Buffers compiler, which parses the schema and then hands it to **plugins** that emit code for a specific language. `protoc` itself knows nothing about Go or Python — the plugins do.
+
+For gRPC there are usually **two** outputs:
+
+- **Message code** — the structs/classes for `User`, `GetUserRequest`, etc. (from the base protobuf plugin).
+- **Service code** — the client stub and the server interface (from the gRPC plugin).
+
+<Mermaid title="protoc parses; plugins emit language code" code={genDiagram} />
+
+export const genDiagram = `flowchart LR
+  proto["user.proto"] --> protoc["protoc\n(parses schema)"]
+  protoc --> base["protobuf plugin\n→ message types"]
+  protoc --> grpc["gRPC plugin\n→ stub + server interface"]`;
+
+## Running it per language
+
+Each language has its own plugin pair. Here is the typical command in each ecosystem:
+
+<Tabs syncKey="lang">
+  <TabItem label="Go">
+    ```bash
+    # install the two plugins once
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+    protoc --go_out=. --go_opt=paths=source_relative \
+           --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+           user/v1/user.proto
+    # → user.pb.go (messages) + user_grpc.pb.go (stub + server interface)
+    ```
+  </TabItem>
+  <TabItem label="Python">
+    ```bash
+    pip install grpcio-tools
+
+    python -m grpc_tools.protoc -I. \
+           --python_out=. --grpc_python_out=. \
+           user/v1/user.proto
+    # → user_pb2.py (messages) + user_pb2_grpc.py (stub + servicer)
+    ```
+  </TabItem>
+  <TabItem label="Node">
+    ```bash
+    npm install --save-dev ts-proto @grpc/grpc-js grpc-tools
+
+    protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+           --ts_proto_out=. --ts_proto_opt=outputServices=grpc-js \
+           user/v1/user.proto
+    # → user.ts (typed messages + client + server interfaces)
+    ```
+  </TabItem>
+</Tabs>
+
+## What you actually get
+
+Whatever the language, the generated code always contains the same three things:
+
+1. **Message types** — a typed object for every `message`, with getters/setters or fields and the serialization logic baked in.
+2. **A client stub** — a class with one method per `rpc`, so the client just calls `stub.GetUser(req)`.
+3. **A server interface** — an abstract base (Go interface, Python servicer, Node service definition) with one method per `rpc` for you to implement.
+
+You never edit generated files. When the `.proto` changes, you regenerate.
+
+## Use buf, not raw protoc
+
+Raw `protoc` commands get unwieldy fast — plugin paths, include paths, output options, multiplied across languages. **`buf`** is the modern tool that replaces them. You declare inputs and outputs in a small config file and run one command:
+
+```yaml
+# buf.gen.yaml
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: gen
+  - remote: buf.build/grpc/go
+    out: gen
+```
+
+```bash
+buf generate
+```
+
+`buf` also lints your schemas and detects breaking changes (covered in the Ecosystem module) — which is why most teams standardize on it.
+
+<Callout title="The one-line takeaway">
+`protoc` parses the `.proto` and delegates to language plugins that emit three things: message types, a client stub, and a server interface. You implement the server and call the stub — never editing generated code. `buf` wraps the whole mess into one config-driven `buf generate`.
+</Callout>
+
+export const quizGen = [
+  {
+    q: 'What is the role of protoc versus its plugins?',
+    options: [
+      'protoc emits Go; plugins emit Python',
+      'protoc parses the schema; language plugins emit the actual code',
+      'protoc runs the server; plugins run the client',
+      'They are the same thing',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What three artifacts does gRPC code generation produce?',
+    options: [
+      'A database, a cache, and a queue',
+      'Message types, a client stub, and a server interface',
+      'HTML, CSS, and JS',
+      'Three copies of the .proto',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'What should you do when the .proto changes?',
+    options: [
+      'Hand-edit the generated files',
+      'Regenerate the code',
+      'Restart the load balancer',
+      'Nothing — it updates itself at runtime',
+    ],
+    answer: 1,
+  },
+  {
+    q: 'Why do most teams use buf instead of raw protoc commands?',
+    options: [
+      'It makes protobuf human-readable',
+      'It replaces fragile multi-plugin commands with one config-driven command, plus linting and breaking-change detection',
+      'It removes the need for a .proto',
+      'It only works with Go',
+    ],
+    answer: 1,
+  },
+];
+
+<Quiz client:visible id="building-services/code-generation" questions={quizGen} />
+
+<ProgressTracker client:visible id="building-services/code-generation" />
