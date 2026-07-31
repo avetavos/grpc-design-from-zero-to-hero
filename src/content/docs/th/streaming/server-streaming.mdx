@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 **Server streaming** คือรูปแบบที่ client ส่ง request เดียวแล้ว server ตอบกลับเป็น *ลำดับ* ของ message บน stream ที่เปิดค้างไว้ client อ่านทีละอันจนกว่า server จะบอกว่าจบ
 
-มันเหมาะกับกรณีที่คำตอบไม่ใช่ค่าเดียวแต่เป็นชุด: ดู event ตอนที่มันเกิด, stream result set ขนาดใหญ่ทีละ row หรือรายงาน progress ของงานที่รันนาน
+รูปแบบนี้เหมาะกับกรณีที่คำตอบไม่ใช่ค่าเดียวแต่เป็นชุด: ดู event ตอนที่เกิด, stream result set ขนาดใหญ่ทีละ row หรือรายงาน progress ของงานที่รันนาน
 
 <Mermaid title="Server streaming: 1 request, stream ของ response" code={ssDiagram} />
 
@@ -139,22 +139,22 @@ client เรียก call เดียวแล้ววน iterate response l
 ## หมายเหตุด้านการออกแบบ
 
 - **message มาตามลำดับ** ภายใน stream เดียว gRPC รับประกันว่า client อ่าน message เรียงตามลำดับที่ server ส่งเป๊ะ
-- **ตั้ง deadline** server stream รันได้นาน client ก็ยังควรจำกัดมันด้วย deadline หรือ cancel เมื่อไม่สนใจแล้ว (อยู่ในบท deadline)
+- **ตั้ง deadline** server stream รันได้นาน client ก็ยังควรจำกัดด้วย deadline หรือ cancel เมื่อไม่สนใจแล้ว (อยู่ในบท deadline)
 - **error มาได้กลาง stream** หลังจากส่ง message ดี ๆ ไปหลายอัน server ก็ยังจบด้วย error status ได้ handle branch ที่เป็น error ของ receive loop ด้วย ไม่ใช่แค่ happy path
 - **server ควรเคารพการ cancel** ถ้า client หลุด `Send` จะ return error — หยุดผลิตแทนที่จะวนไม่รู้จบ
 
 <Callout title="สรุปหนึ่งบรรทัด">
-Server streaming คือ 1 request กับ `stream` ของ response: server ส่งใน loop และ client อ่านจนถึง EOF ใช้มันกับ live feed, result set ขนาดใหญ่ และ progress — และจำไว้ว่า message เรียงลำดับ, error มาได้กลาง stream และ server ต้องหยุดเมื่อ client cancel
+Server streaming คือ 1 request กับ `stream` ของ response: server ส่งใน loop และ client อ่านจนถึง EOF ใช้รูปแบบนี้กับ live feed, result set ขนาดใหญ่ และ progress — และจำไว้ว่า message เรียงลำดับ, error มาได้กลาง stream และ server ต้องหยุดเมื่อ client cancel
 </Callout>
 
 export const quizSS = [
   {
     q: '`returns (stream Price)` เปลี่ยนอะไรใน service method?',
     options: [
-      'มัน compress response',
+      'compress response',
       'server ส่ง Price message หลายอันบน stream เดียวได้ แทนที่จะส่งอันเดียว',
-      'มันทำให้ call ใช้ UDP',
-      'มันปิด request message',
+      'ทำให้ call ใช้ UDP',
+      'ปิด request message',
     ],
     answer: 1,
   },
@@ -164,15 +164,15 @@ export const quizSS = [
       'หลังจากครบ 30 วินาทีตายตัว',
       'เมื่อ server ปิด stream (receive loop เจอ EOF/end)',
       'เมื่อ client ส่ง request ที่สอง',
-      'มันไม่มีวันจบ',
+      'ไม่มีวันจบ',
     ],
     answer: 1,
   },
   {
     q: 'gRPC รับประกันอะไรเกี่ยวกับ message ภายใน stream เดียว?',
     options: [
-      'มันมาลำดับไหนก็ได้',
-      'มันมาเรียงตามลำดับที่ผู้ส่งส่งเป๊ะ',
+      'มาลำดับไหนก็ได้',
+      'มาเรียงตามลำดับที่ผู้ส่งส่งเป๊ะ',
       'ตัวซ้ำถูกลบอัตโนมัติ',
       'ส่งแบบ exactly once ข้าม retry',
     ],

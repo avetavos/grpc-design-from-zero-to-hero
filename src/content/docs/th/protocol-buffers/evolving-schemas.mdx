@@ -20,17 +20,17 @@ export const compatDiagram = `flowchart TB
   newc["client ใหม่"] -->|field เพิ่ม| olds["server เก่า\n(ข้าม field ที่ไม่รู้จัก)"]
   oldc["client เก่า"] -->|ไม่มี field ใหม่| news["server ใหม่\n(อ่าน default)"]`;
 
-กลไกที่ทำให้เป็นแบบนี้ได้คือสิ่งที่คุณรู้อยู่แล้ว: **field ถูกระบุด้วย number** server เก่าที่ได้รับ field number ที่ไม่รู้จักก็แค่ข้ามมันไป server ใหม่ที่ไม่ได้รับ field ที่มันคาดหวังก็อ่าน default number ไม่ใช่ชื่อ คือสิ่งที่รักษาความสงบไว้
+กลไกที่ทำให้เป็นแบบนี้ได้คือสิ่งที่คุณรู้อยู่แล้ว: **field ถูกระบุด้วย number** server เก่าที่เจอ field number ที่ไม่รู้จักก็แค่ข้ามไป ส่วน server ใหม่ที่ไม่ได้รับ field ที่คาดหวังก็อ่านค่า default การระบุ field ด้วย number ไม่ใช่ชื่อ คือสิ่งที่รักษาความสงบไว้
 
 ## change ที่ปลอดภัยเสมอ
 
 พวกนี้ไม่มีทางทำให้ client ที่ deploy แล้วพัง:
 
-- **เพิ่ม field ใหม่** ด้วย number ที่สดใหม่ไม่เคยใช้ code เก่าข้ามมัน code ใหม่อ่านมัน (เป็น default เมื่อไม่มี)
-- **ลบ field** — *ตราบใดที่คุณ `reserved` number ของมัน* (ดูด้านล่าง) client เก่าที่ยังส่งมาก็ถูกข้ามไปเฉย ๆ
+- **เพิ่ม field ใหม่** ด้วย number ที่สดใหม่ไม่เคยใช้ code เก่าจะข้ามไป ส่วน code ใหม่อ่านค่าได้ (และได้ default เมื่อไม่มีค่ามา)
+- **ลบ field** — *ตราบใดที่คุณ `reserved` number นั้นไว้* (ดูด้านล่าง) client เก่าที่ยังส่งมาก็ถูกข้ามไปเฉย ๆ
 - **rename field** wire ถือ number ดังนั้นชื่อเปลี่ยนได้ฟรี
 - **เพิ่ม value ใหม่ให้ enum** หรือ field ใหม่ให้ `oneof` client เก่ามอง unknown เป็น unknown
-- **เพิ่ม RPC method ใหม่** ให้ service client ที่มีอยู่ไม่ได้เรียกมัน ไม่มีอะไรพัง
+- **เพิ่ม RPC method ใหม่** ให้ service เดิม  ตัว client ที่มีอยู่ไม่ได้เรียก method ใหม่นั้น ไม่มีอะไรพัง
 
 ## change ที่พัง — แบบเงียบ ๆ
 
@@ -45,7 +45,7 @@ export const compatDiagram = `flowchart TB
 
 ## วินัยเรื่อง reserved
 
-เพราะอันตรายคือการ *reuse* การป้องกันจึงง่ายและเป็นกลไก: **เมื่อลบ field ให้ `reserved` number และชื่อของมันทันที**
+เพราะอันตรายคือการ *reuse* การป้องกันจึงง่ายและเป็นกลไก: **เมื่อลบ field ให้ `reserved` ทั้ง number และชื่อไว้ทันที**
 
 ```proto
 message User {
@@ -58,14 +58,14 @@ message User {
 }
 ```
 
-ตอนนี้ compiler เป็นตาข่ายกันตกให้คุณ: ความพยายามในอนาคตที่จะ reuse number `3` หรือชื่อ `email` จะ build ไม่ผ่าน เครื่องมืออย่าง **buf** ไปไกลกว่านั้นอีก มันตรวจจับ breaking change อัตโนมัติใน CI ได้ด้วยการเทียบ `.proto` ของคุณกับ version ที่ publish ไปก่อนหน้า — เปลี่ยน "ฉันเพิ่งทำ client พังหมดเลยหรือเปล่า?" ให้เป็น pull request ที่ fail แทน incident ตอนตีสอง
+ตอนนี้ compiler เป็นตาข่ายกันตกให้คุณ: ความพยายามในอนาคตที่จะ reuse number `3` หรือชื่อ `email` จะ build ไม่ผ่าน เครื่องมืออย่าง **buf** ไปไกลกว่านั้นอีก คือตรวจจับ breaking change อัตโนมัติใน CI ได้ด้วยการเทียบ `.proto` ของคุณกับ version ที่ publish ไปก่อนหน้า — เปลี่ยน "ฉันเพิ่งทำ client พังหมดเลยหรือเปล่า?" ให้เป็น pull request ที่ fail แทน incident ตอนตีสอง
 
 ## version ที่ package ไม่ใช่ด้วยการทำพัง
 
 เมื่อคุณจำเป็นต้องทำ change ที่เข้ากันไม่ได้จริง ๆ อย่าไปแก้ message เดิม ให้ publish package version ใหม่ (`user.v2`) ควบคู่กับ `user.v1` แล้วค่อย ๆ migrate client นี่คือเหตุผลที่คุณเห็น `package user.v1;` อยู่ทุกที่ — version ถูกฝังไว้ใน type path เพื่อให้ v1 กับ v2 อยู่ด้วยกันได้
 
 <Callout title="สรุปหนึ่งบรรทัด">
-compatibility ของ protobuf ตั้งอยู่บนข้อเท็จจริงเดียว: **number ระบุ field ไม่ใช่ชื่อ** การเพิ่ม field, ลบแล้ว reserve และ rename ปลอดภัย ส่วนการ reuse หรือ renumber tag ทำข้อมูลเสียแบบเงียบ ๆ ลบ field → `reserved` number ของมัน; ต้องการ breaking change → ปล่อย package version ใหม่ และให้เครื่องมืออย่าง buf บังคับใน CI
+compatibility ของ protobuf ตั้งอยู่บนข้อเท็จจริงเดียว: **number ระบุ field ไม่ใช่ชื่อ** การเพิ่ม field, ลบแล้ว reserve และ rename ปลอดภัย ส่วนการ reuse หรือ renumber tag ทำข้อมูลเสียแบบเงียบ ๆ ลบ field → `reserved` number นั้นไว้; ต้องการ breaking change → ปล่อย package version ใหม่ และให้เครื่องมืออย่าง buf บังคับใน CI
 </Callout>
 
 export const quizEvolve = [
@@ -92,10 +92,10 @@ export const quizEvolve = [
   {
     q: 'ทำไม reuse field number ที่ลบไปแล้วถึงอันตรายนัก?',
     options: [
-      'มันทำให้ encode ช้าลง',
-      'client เก่ายังส่ง number นั้น bytes ของมันเลยถูก decode เป็น field ใหม่ — ข้อมูลเสียแบบเงียบ',
+      'ทำให้ encode ช้าลง',
+      'client เก่ายังส่ง number นั้นอยู่ bytes เดิมเลยโดน decode เป็น field ใหม่ — ข้อมูลเสียแบบเงียบ',
       'compiler ปฏิเสธการ build',
-      'มันพังแค่ documentation',
+      'พังแค่ documentation',
     ],
     answer: 1,
   },

@@ -13,9 +13,9 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## สองคำถาม สองชั้น
 
-security ใน gRPC ตอบคำถามที่ต่างกันสองข้อ และสำคัญมากที่จะไม่รวมมันเข้าด้วยกัน:
+security ใน gRPC ตอบคำถามที่ต่างกันสองข้อ และสำคัญมากที่จะไม่รวมสองข้อนี้เข้าด้วยกัน:
 
-- **connection เป็นส่วนตัวไหม และ *server* เป็นตัวที่มันอ้างจริงหรือเปล่า?** → **transport security** (TLS)
+- **connection เป็นส่วนตัวไหม และ *server* เป็นตัวที่อ้างจริงหรือเปล่า?** → **transport security** (TLS)
 - **ใครเป็นคน *เรียก* และเขาได้รับอนุญาตให้เรียก call นี้ไหม?** → **call authentication** (token ปกติอยู่ใน metadata)
 
 gRPC จัดการสองอย่างนี้เป็น credentials สองชนิด: **channel credentials** (ชั้น transport) และ **call credentials** (auth ต่อ RPC) เกือบทุกครั้งคุณต้องการทั้งคู่
@@ -39,7 +39,7 @@ export const layersDiagram = `flowchart TB
 
 ## call credentials: ใครเป็นคนเรียก
 
-TLS พิสูจน์ตัวตนของ *server* และของเครื่อง แต่บ่อยครั้งคุณต้องการตัวตนของ *ผู้ใช้* ด้วย — bearer token (JWT, OAuth) ที่ส่งต่อ call gRPC แนบมันเป็น **call credentials**: client ใส่ token `authorization` ใน metadata ของทุก RPC แล้ว server interceptor ตรวจสอบและ reject ตัวที่ไม่ถูกต้องด้วย `UNAUTHENTICATED`
+TLS พิสูจน์ตัวตนของ *server* และของเครื่อง แต่บ่อยครั้งคุณต้องการตัวตนของ *ผู้ใช้* ด้วย — bearer token (JWT, OAuth) ที่ส่งต่อ call gRPC แนบ token นี้เป็น **call credentials**: client ใส่ token `authorization` ใน metadata ของทุก RPC แล้ว server interceptor ตรวจสอบและ reject ตัวที่ไม่ถูกต้องด้วย `UNAUTHENTICATED`
 
 call credentials เป็นแบบ **ต่อ RPC** ดังนั้น call ต่าง ๆ บน channel เดียวกันสามารถถือ token คนละตัวได้ (เช่น channel เดียว ผู้ใช้ปลายทางหลายคน)
 
@@ -97,7 +97,7 @@ export const quizSec = [
     q: 'channel credentials (TLS) ตอบคำถามอะไร?',
     options: [
       'จะ query database ไหน',
-      'connection เป็นส่วนตัวไหม และ server เป็นตัวที่มันอ้างจริงไหม',
+      'connection เป็นส่วนตัวไหม และ server เป็นตัวที่อ้างจริงไหม',
       'ให้ retry ได้กี่ครั้ง',
       'จะเรียก method ไหน',
     ],
@@ -118,7 +118,7 @@ export const quizSec = [
     options: [
       'ตั้งได้ครั้งเดียวต่อ process',
       'call ต่าง ๆ บน channel เดียวกันถือ token คนละตัวได้',
-      'มันแทน TLS',
+      'แทน TLS',
       'ส่งเฉพาะ call แรกเท่านั้น',
     ],
     answer: 1,

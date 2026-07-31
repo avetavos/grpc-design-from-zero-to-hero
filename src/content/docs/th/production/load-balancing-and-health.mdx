@@ -1,6 +1,6 @@
 ---
 title: 'Load Balancing & Health'
-description: 'ทำไม L4 balancer แบบไร้เดียงสาทำ gRPC พัง, client-side load balancing กระจาย call ไปหลาย backend อย่างไร และ health checking protocol ที่ป้อนข้อมูลให้มัน'
+description: 'ทำไม L4 balancer แบบไร้เดียงสาทำ gRPC พัง, client-side load balancing กระจาย call ไปหลาย backend อย่างไร และ health checking protocol ที่ป้อนข้อมูลให้ระบบนี้'
 sidebar:
   order: 5
 ---
@@ -13,9 +13,9 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## ปัญหา: connection เดียว call หลายอัน
 
-ทุกอย่างที่ทำให้ gRPC เร็วก็ทำให้ load balancing ยากด้วย gRPC client เปิด **connection HTTP/2 เดียวที่อยู่ยาว** แล้ว multiplex ทุก call ผ่านมัน ดีต่อ latency — แต่ **L4 (TCP) load balancer** แบบดั้งเดิม balance ที่ *connection* ไม่ใช่ request มันเลือก backend ครั้งเดียว ตอนที่ connection เปิด แล้วจากนั้นทุก call ก็วิ่งบน connection เดียวไปยัง backend ตัวเดียว
+ทุกอย่างที่ทำให้ gRPC เร็วก็ทำให้ load balancing ยากด้วย gRPC client เปิด **connection HTTP/2 เดียวที่อยู่ยาว** แล้ว multiplex ทุก call ผ่าน connection เดียวนั้น ดีต่อ latency — แต่ **L4 (TCP) load balancer** แบบดั้งเดิม balance ที่ *connection* ไม่ใช่ที่ request คือเลือก backend ครั้งเดียวตอน connection เปิด จากนั้นทุก call ก็วิ่งบน connection เดียวไปยัง backend ตัวเดียวตลอด
 
-<Mermaid title="L4 balancer pin ทุก call ไว้ที่ backend เดียว; client-side LB กระจายมัน" code={lbDiagram} />
+<Mermaid title="L4 balancer pin ทุก call ไว้ที่ backend เดียว; client-side LB กระจาย call ออกไป" code={lbDiagram} />
 
 export const lbDiagram = `flowchart TB
   subgraph l4["L4 (TCP) balancer — pin connection"]
@@ -38,9 +38,9 @@ export const lbDiagram = `flowchart TB
 มีสองวิธีที่ถูกต้อง:
 
 - **L7 (application-aware) proxy** — proxy ที่พูด HTTP/2 และ gRPC ได้ (Envoy, Linkerd หรือ cloud LB ที่รู้จัก gRPC) balance ทีละ *call* ไม่ใช่ connection client แค่คุยกับ proxy
-- **Client-side load balancing** — ตัว client เองรู้จัก backend ทุกตัวและกระจาย call ไปให้ มันใช้ **name resolver** (เพื่อค้นหาชุดของ backend address เช่นผ่าน DNS หรือ xDS) และ **load-balancing policy** (เช่น `round_robin`) เพื่อเลือก **subchannel** — หนึ่ง connection ต่อ backend — สำหรับแต่ละ call
+- **Client-side load balancing** — ตัว client เองรู้จัก backend ทุกตัวและกระจาย call ไปให้เอง โดยใช้ **name resolver** (เพื่อค้นหาชุดของ backend address เช่นผ่าน DNS หรือ xDS) และ **load-balancing policy** (เช่น `round_robin`) เพื่อเลือก **subchannel** — หนึ่ง connection ต่อ backend — สำหรับแต่ละ call
 
-client-side LB เป็นแนวทาง idiomatic ใน gRPC เพราะมันเลี่ยง network hop ที่เพิ่มขึ้น setup คลาสสิก: resolve `dns:///my-service:50051` เป็นหลาย IP แล้ว apply `round_robin`
+client-side LB เป็นแนวทาง idiomatic ใน gRPC เพราะเลี่ยง network hop ที่เพิ่มขึ้นได้ setup คลาสสิก: resolve `dns:///my-service:50051` เป็นหลาย IP แล้ว apply `round_robin`
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -93,14 +93,14 @@ service Health {
 }
 ```
 
-load balancer และ orchestrator (Kubernetes, Envoy) เรียก `Check` — หรือ subscribe ด้วย `Watch` — แล้วหยุด route ไปยัง backend ที่รายงาน `NOT_SERVING` เพราะมันเป็น proto มาตรฐาน เครื่องมืออย่าง `grpc_health_probe` จึงใช้ได้กับ server ของทุกภาษา
+load balancer และ orchestrator (Kubernetes, Envoy) เรียก `Check` — หรือ subscribe ด้วย `Watch` — แล้วหยุด route ไปยัง backend ที่รายงาน `NOT_SERVING` เพราะเป็น proto มาตรฐาน เครื่องมืออย่าง `grpc_health_probe` จึงใช้ได้กับ server ของทุกภาษา
 
 ## Keepalive
 
-connection ที่อยู่ยาวอาจตายเงียบ ๆ ได้ (NAT ที่ idle ตัดทิ้ง, backend หายไป) **keepalive** ping — HTTP/2 PING เล็ก ๆ ตามช่วงเวลา — ตรวจจับ connection ที่ตายได้เร็ว เพื่อให้ client reconnect และ re-resolve ใหม่ แทนที่จะส่ง call เข้าไปในหลุมดำ ปรับมันอย่างระวัง: ก้าวร้าวเกินไป server อาจ reject คุณเพราะ ping ถี่เกิน
+connection ที่อยู่ยาวอาจตายเงียบ ๆ ได้ (NAT ที่ idle ตัดทิ้ง, backend หายไป) **keepalive** ping — HTTP/2 PING เล็ก ๆ ตามช่วงเวลา — ตรวจจับ connection ที่ตายได้เร็ว เพื่อให้ client reconnect และ re-resolve ใหม่ แทนที่จะส่ง call เข้าไปในหลุมดำ ปรับค่าอย่างระวัง: ตั้งถี่เกินไป server ก็อาจ reject คุณเพราะ ping รัวเกินไป
 
 <Callout title="สรุปหนึ่งบรรทัด">
-gRPC ถือ connection แบบ multiplex เดียว ดังนั้น **L4 balancer แบบไร้เดียงสาจะ pin ทุก call ไว้ที่ backend เดียว** แก้ด้วย **L7 proxy ที่รู้จัก gRPC** หรือ **client-side load balancing** (resolver + policy เช่น `round_robin` + หนึ่ง subchannel ต่อ backend) ป้อนข้อมูลให้มันด้วย **Health Checking Protocol** มาตรฐาน เพื่อให้ traffic เลี่ยง server ที่ไม่ healthy และใช้ **keepalive** เพื่อรู้ทันว่า connection ตายแล้ว
+gRPC ถือ connection แบบ multiplex เดียว ดังนั้น **L4 balancer แบบไร้เดียงสาจะ pin ทุก call ไว้ที่ backend เดียว** แก้ด้วย **L7 proxy ที่รู้จัก gRPC** หรือ **client-side load balancing** (resolver + policy เช่น `round_robin` + หนึ่ง subchannel ต่อ backend) ป้อนข้อมูลให้ balancer ด้วย **Health Checking Protocol** มาตรฐาน เพื่อให้ traffic เลี่ยง server ที่ไม่ healthy และใช้ **keepalive** เพื่อรู้ทันว่า connection ตายแล้ว
 </Callout>
 
 export const quizLb = [
@@ -108,8 +108,8 @@ export const quizLb = [
     q: 'ทำไม L4 (TCP) load balancer ธรรมดาถึงกระจาย traffic ของ gRPC ได้แย่?',
     options: [
       'gRPC ไม่ใช้ TCP',
-      'มัน balance ที่ connection และ gRPC ใช้ connection เดียวที่อยู่ยาว — ทุก call จึง pin ไปที่ backend เดียว',
-      'มันอ่าน protobuf ไม่ได้',
+      'balance ที่ระดับ connection แต่ gRPC ใช้ connection เดียวที่อยู่ยาว — ทุก call จึง pin ไปที่ backend เดียว',
+      'อ่าน protobuf ไม่ได้',
       'gRPC ห้ามใช้ load balancer',
     ],
     answer: 1,

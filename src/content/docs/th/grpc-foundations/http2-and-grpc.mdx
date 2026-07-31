@@ -1,6 +1,6 @@
 ---
 title: 'HTTP/2 & gRPC'
-description: 'ทำไม gRPC ต้องใช้ HTTP/2 — multiplexing บน connection เดียว, stream, binary framing และ header compression — และมันให้อะไรกับคุณ'
+description: 'ทำไม gRPC ต้องใช้ HTTP/2 — multiplexing บน connection เดียว, stream, binary framing และ header compression — และให้อะไรกับคุณ'
 sidebar:
   order: 4
 ---
@@ -12,13 +12,13 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## gRPC คือ HTTP/2 ตั้งแต่ต้นจนจบ
 
-gRPC ไม่ได้คิดค้น transport ของตัวเอง gRPC call ทุกครั้งคือ **HTTP/2 request** — ชื่อ method คือ path, message คือ body และ metadata คือ header gRPC เป็น *convention ที่วางทับ HTTP/2* และนั่นคือเหตุผลที่มันได้คุณสมบัติที่สำคัญที่สุดของ HTTP/2 มาด้วย: **multiplexing**
+gRPC ไม่ได้คิดค้น transport ของตัวเอง gRPC call ทุกครั้งคือ **HTTP/2 request** — ชื่อ method คือ path, message คือ body และ metadata คือ header gRPC เป็น *convention ที่วางทับ HTTP/2* และนั่นคือเหตุผลที่ได้คุณสมบัติที่สำคัญที่สุดของ HTTP/2 มาด้วย: **multiplexing**
 
 เข้าใจ feature ของ HTTP/2 แค่ 4 อย่างก็อธิบายพฤติกรรมของ gRPC ได้เกือบทั้งหมด
 
 ## 1. Multiplexing: หลาย call, หนึ่ง connection
 
-ภายใต้ HTTP/1.1 หนึ่ง connection จัดการได้ทีละ request ยิงไป 10 request แล้วมันก็จะเข้าคิวบน connection เดียว (head-of-line blocking) หรือคุณต้องเปิด 10 connection
+ภายใต้ HTTP/1.1 หนึ่ง connection จัดการได้ทีละ request ยิงไป 10 request แล้วทั้งหมดก็จะเข้าคิวบน connection เดียว (head-of-line blocking) หรือคุณต้องเปิด 10 connection
 
 HTTP/2 แบ่ง connection เดียวออกเป็น **stream** อิสระหลายเส้น แต่ละ gRPC call คือ 1 stream หลายสิบ call วิ่งบน TCP connection เดียวกันพร้อมกันได้ โดยไม่มีตัวไหนบล็อกตัวอื่น
 
@@ -36,7 +36,7 @@ export const muxDiagram = `flowchart TB
     conn --> sC["stream 5: call C"]
   end`;
 
-นี่คือเหตุผลที่ gRPC client ถือ **channel** เส้นเดียวที่อยู่ยาว ๆ ไปยัง server แล้วใช้มันซ้ำกับทุกอย่าง — การเปิด connection ต่อ call จะทิ้งข้อได้เปรียบที่ใหญ่ที่สุดไป
+นี่คือเหตุผลที่ gRPC client ถือ **channel** เส้นเดียวที่อยู่ยาว ๆ ไปยัง server แล้วใช้ channel นั้นซ้ำกับทุกอย่าง — การเปิด connection ต่อ call จะทิ้งข้อได้เปรียบที่ใหญ่ที่สุดไป
 
 ## 2. stream เป็นสองทิศทาง
 
@@ -55,9 +55,9 @@ gRPC ส่ง metadata — auth token, trace ID, content type — เป็น 
 เพราะ gRPC ทำงานบน HTTP/2 นิสัยการออกแบบหลายอย่างจึงตามมาโดยตรง:
 
 - **ใช้ channel ซ้ำ** หนึ่ง channel ต่อปลายทาง แชร์กันทุก call — การสร้าง channel ต่อ request คือการทิ้ง multiplexing ทิ้งไป
-- **call ช้าตัวเดียวจะไม่บล็อกตัวอื่น** บน connection เดียวกัน — แต่หนึ่ง connection ก็มีขีดจำกัด (จำนวน stream พร้อมกันสูงสุด) ซึ่งเป็นเหตุผลที่ load balancing ที่ L7 สำคัญ (มีในบทหลัง)
-- **streaming มี cost ต่ำ** เพราะมันเป็นโหมดดั้งเดิมของ transport ไม่ใช่การจำลอง
-- **คุณต้องมี HTTP/2 จริง ๆ ตลอดทาง** proxy และ load balancer ต้องพูด HTTP/2 ได้ ไม่งั้นมันจะทำให้ gRPC พัง — เป็นเซอร์ไพรส์ที่พบบ่อยมากตอน deploy ครั้งแรก
+- **call ช้าตัวเดียวจะไม่บล็อกตัวอื่น** บน connection เดียวกัน — แต่หนึ่ง connection ก็มีขีดจำกัด (จำนวน stream พร้อมกันสูงสุด) นั่นคือเหตุผลที่ load balancing ที่ L7 สำคัญ (มีในบทหลัง)
+- **streaming มี cost ต่ำ** เพราะเป็นโหมดดั้งเดิมของ transport ไม่ใช่การจำลอง
+- **คุณต้องมี HTTP/2 จริง ๆ ตลอดทาง** proxy และ load balancer ต้องพูด HTTP/2 ได้ ไม่งั้น gRPC จะพัง — เป็นเซอร์ไพรส์ที่พบบ่อยมากตอน deploy ครั้งแรก
 
 <Callout title="สรุปในบรรทัดเดียว">
 gRPC เป็น convention บาง ๆ ที่วางทับ HTTP/2: method คือ path, message คือ binary DATA frame, metadata คือ header ที่ถูกบีบอัดด้วย HPACK และทุก call คือ multiplexed stream นั่นคือเหตุผลที่ channel เดียวรับได้หลาย call พร้อมกัน, ทำไม streaming ถึงเป็น native และทำไมทุก hop ใน infrastructure ของคุณต้องพูด HTTP/2 ได้

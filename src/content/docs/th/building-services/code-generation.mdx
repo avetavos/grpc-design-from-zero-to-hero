@@ -11,9 +11,9 @@ import Callout from '../../../../components/Callout.astro';
 import Quiz from '../../../../components/Quiz.tsx';
 import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
-## compiler กับ plugin ของมัน
+## compiler กับ plugin ของตัวเอง
 
-ไฟล์ `.proto` ตัวเดียวทำอะไรไม่ได้ คุณต้องรันมันผ่าน **`protoc`** ซึ่งเป็น compiler ของ Protocol Buffers ที่ parse schema แล้วส่งต่อให้ **plugin** ที่ emit code สำหรับภาษาใดภาษาหนึ่ง ตัว `protoc` เองไม่รู้จัก Go หรือ Python เลย — plugin ต่างหากที่รู้
+ไฟล์ `.proto` ตัวเดียวทำอะไรไม่ได้ คุณต้องรันไฟล์นั้นผ่าน **`protoc`** ที่เป็น compiler ของ Protocol Buffers ที่ parse schema แล้วส่งต่อให้ **plugin** ที่ emit code สำหรับภาษาใดภาษาหนึ่ง ตัว `protoc` เองไม่รู้จัก Go หรือ Python เลย — plugin ต่างหากที่รู้
 
 สำหรับ gRPC ปกติจะมี output **สอง** ส่วน:
 
@@ -102,12 +102,12 @@ buf generate
 
 export const quizGen = [
   {
-    q: 'protoc กับ plugin ของมันมีบทบาทต่างกันอย่างไร?',
+    q: 'protoc กับ plugin ของตัวเองมีบทบาทต่างกันอย่างไร?',
     options: [
       'protoc emit Go; plugin emit Python',
       'protoc parse schema; plugin ของแต่ละภาษา emit code จริง',
       'protoc รัน server; plugin รัน client',
-      'มันคือสิ่งเดียวกัน',
+      'เป็นสิ่งเดียวกัน',
     ],
     answer: 1,
   },
@@ -127,17 +127,17 @@ export const quizGen = [
       'แก้ไฟล์ที่ generate มาด้วยมือ',
       'generate code ใหม่',
       'restart load balancer',
-      'ไม่ต้องทำอะไร — มัน update ตัวเองตอน runtime',
+      'ไม่ต้องทำอะไร — generated code update ตัวเองตอน runtime',
     ],
     answer: 1,
   },
   {
     q: 'ทำไมทีมส่วนใหญ่ถึงใช้ buf แทนคำสั่ง protoc ดิบ ๆ?',
     options: [
-      'มันทำให้ protobuf อ่านออกด้วยตาเปล่า',
-      'มันแทนคำสั่งหลาย plugin ที่เปราะด้วยคำสั่งเดียวที่ขับด้วย config พร้อม lint และตรวจ breaking change',
-      'มันตัดความจำเป็นของ .proto ออกไป',
-      'มันใช้ได้กับ Go เท่านั้น',
+      'ทำให้ protobuf อ่านออกด้วยตาเปล่า',
+      'แทนคำสั่งหลาย plugin ที่เปราะด้วยคำสั่งเดียวที่ขับด้วย config พร้อม lint และตรวจ breaking change',
+      'ตัดความจำเป็นของ .proto ออกไป',
+      'ใช้ได้กับ Go เท่านั้น',
     ],
     answer: 1,
   },

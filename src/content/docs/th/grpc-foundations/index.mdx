@@ -12,7 +12,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## แนวคิดในประโยคเดียว
 
-**gRPC ทำให้โปรแกรมหนึ่งเรียก function ในอีกโปรแกรมหนึ่ง — ที่รันอยู่บนอีกเครื่องหนึ่ง — เหมือนเรียก function ในเครื่องตัวเอง** คุณนิยาม function และข้อมูลของมันครั้งเดียวในไฟล์ `.proto` แล้ว gRPC จะ generate code ฝั่ง client และ server ที่ทำให้ network หายไปจากสายตา
+**gRPC ทำให้โปรแกรมหนึ่งเรียก function ในอีกโปรแกรมหนึ่ง — ที่รันอยู่บนอีกเครื่องหนึ่ง — เหมือนเรียก function ในเครื่องตัวเอง** คุณนิยาม function และข้อมูลของตัวเองครั้งเดียวในไฟล์ `.proto` แล้ว gRPC จะ generate code ฝั่ง client และ server ที่ทำให้ network หายไปจากสายตา
 
 นี่คือทั้งหมดที่ gRPC สัญญาไว้: คุณเขียน `stub.GetUser(id)` แล้ว request จะวิ่งข้าม network ไปรันบน server และคืนผลลัพธ์แบบมี type กลับมา — ไม่มี URL, ไม่ต้อง parse JSON, ไม่ต้องเขียน HTTP เอง
 

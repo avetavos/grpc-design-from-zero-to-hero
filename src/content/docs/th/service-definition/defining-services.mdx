@@ -25,7 +25,7 @@ service UserService {
 }
 ```
 
-อ่านมันเหมือนเมนูของ call: service นี้มี 3 method แต่ละตัวมี input และ output ที่มี type ชัดเจน นั่นคือหน้าตา API ทั้งหมด — ไม่มี URL, ไม่มี verb, ไม่มี query string
+อ่านไฟล์นี้เหมือนเมนูของ call: service นี้มี 3 method แต่ละตัวมี input และ output ที่มี type ชัดเจน นั่นคือหน้าตา API ทั้งหมด — ไม่มี URL, ไม่มี verb, ไม่มี query string
 
 ## หนึ่ง request และหนึ่ง response message ต่อ method
 
@@ -66,7 +66,7 @@ export const versionDiagram = `flowchart TB
   v2["package user.v2\nUserService (redesigned)"] --> new["new clients\nadopt v2"]
   note["both run side by side\nuntil v1 is retired"]`;
 
-เพราะ `user.v1.UserService` และ `user.v2.UserService` เป็น type คนละตัวที่มีตัวตนบน wire ต่างกัน คุณจึง ship การ redesign แบบ breaking เป็น `v2` ได้ ในขณะที่ `v1` ยังให้บริการ client เดิมต่อไป ไม่ต้องมี flag-day migration ที่บังคับให้ย้ายพร้อมกัน พอ client ทุกตัวย้ายครบแล้วค่อยปลด `v1` ทิ้ง ใส่ version ไว้ตั้งแต่วันแรก — ไปเติมทีหลังจะเจ็บปวด
+เพราะ `user.v1.UserService` และ `user.v2.UserService` เป็น type คนละตัวที่มีตัวตนบน wire ต่างกัน คุณจึง ship การ redesign แบบ breaking เป็น `v2` ได้ ส่วน `v1` ยังให้บริการ client เดิมต่อไป ไม่ต้องมี flag-day migration ที่บังคับให้ย้ายพร้อมกัน พอ client ทุกตัวย้ายครบแล้วค่อยปลด `v1` ทิ้ง ใส่ version ไว้ตั้งแต่วันแรก — ไปเติมทีหลังจะเจ็บปวด
 
 <Callout title="สรุปหนึ่งบรรทัด">
 `service` คือรายชื่อ method `rpc` ที่ตั้งชื่อไว้ แต่ละตัวมี request และ response message เฉพาะของตัวเองเพื่อให้ขยายได้โดยไม่ทำให้ client พัง ทำ namespace ให้ type ด้วย `package` และใส่ API version ไว้ใน package path (`user.v1`) เสมอ เพื่อให้ `v2` อยู่ร่วมกับ `v1` ได้ระหว่าง migration

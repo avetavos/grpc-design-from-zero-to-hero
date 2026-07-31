@@ -19,7 +19,7 @@ gRPC แบบ native ต้องควบคุม HTTP/2 frame อย่า�
 
 ## gRPC-Web: dialect ที่เป็นมิตรกับ browser
 
-**gRPC-Web** คือ variant ของ protocol ที่ออกแบบให้อยู่ในสิ่งที่ browser *ทำได้* มันขน protobuf message เดิม แต่ frame ให้รอดผ่าน HTTP request ปกติ — รวมถึง encode trailer (ที่ gRPC ใช้ใส่ status code) ลงไปใน response body เพราะ browser อ่าน HTTP/2 trailer ไม่ได้
+**gRPC-Web** คือ variant ของ protocol ที่ออกแบบให้อยู่ในสิ่งที่ browser *ทำได้* โดยขน protobuf message เดิม แต่ frame ให้รอดผ่าน HTTP request ปกติ — รวมถึง encode trailer (ที่ gRPC ใช้ใส่ status code) ลงไปใน response body เพราะ browser อ่าน HTTP/2 trailer ไม่ได้
 
 จุดที่ต้องระวัง: request แบบ gRPC-Web ไม่ใช่ byte ชุดเดียวกับ request แบบ native gRPC ต้องมีอะไรสักอย่างมาแปลระหว่างสองแบบนี้
 
@@ -81,7 +81,7 @@ export const webDiagram = `flowchart LR
 
 **Connect** (จาก Buf) คือแนวทางใหม่ที่พูดได้ 3 protocol จาก server เดียว: Connect protocol ของตัวเอง, gRPC และ gRPC-Web โดย Connect protocol ทำงานบน HTTP/1.1 ธรรมดาและขน JSON ได้ ทำให้ browser — หรือแม้แต่ `curl` — เรียกได้โดยไม่ต้องมี proxy เลย ขณะที่ backend service ยังใช้ gRPC อยู่ สำหรับงานใหม่ที่หันหน้าเข้า browser Connect ตัด friction ของ gRPC-Web ออกไปเกือบหมด
 
-## มันมีผลต่อการออกแบบยังไง
+## มีผลต่อการออกแบบยังไง
 
 - **วางแผน proxy ตั้งแต่วันแรก** ถ้ามี browser เป็น client gRPC-Web ไม่ใช่ glue ที่ค่อยเพิ่มทีหลัง แต่เป็นทางเดียวที่เข้าได้
 - **streaming ถูกจำกัด** gRPC-Web รองรับ unary และ server-streaming ได้ดี แต่ client-streaming และ bidirectional streaming ยังใช้บน browser ไม่ได้ทั่วไป
@@ -125,10 +125,10 @@ export const quizWeb = [
   {
     q: 'อะไรทำให้ Connect น่าใช้สำหรับ browser-facing API ใหม่ ๆ?',
     options: [
-      'มันตัดความจำเป็นของ `.proto` ออก',
+      'ตัดความจำเป็นของ `.proto` ออก',
       'server เดียวพูด gRPC, gRPC-Web และ protocol ที่เป็นมิตรกับ browser บน HTTP/1.1 — ไม่ต้องมี proxy แยก',
-      'มันเร็วกว่า native gRPC ฝั่ง backend',
-      'มันแปลง protobuf เป็น XML',
+      'เร็วกว่า native gRPC ฝั่ง backend',
+      'แปลง protobuf เป็น XML',
     ],
     answer: 1,
   },

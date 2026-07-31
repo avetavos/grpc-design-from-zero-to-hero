@@ -71,7 +71,7 @@ client ส่ง **ลำดับ** ของ message; server อ่านท�
 
 ### 4. Bidirectional — หลายตัวทั้งสองทาง อิสระต่อกัน
 
-ทั้งสองฝั่ง stream ผ่าน connection เดียวกัน และ — จุดที่ลึกคือ — สองทิศทางนี้ **อิสระต่อกัน** server ไม่ต้องรอให้ client ส่งเสร็จ; message สลับกันไปมาได้อย่างอิสระ นี่คือรูปแบบสำหรับงาน real-time แบบสนทนา: chat, collaboration สด, control channel สองทาง มันทรงพลังที่สุดและซับซ้อนที่สุด จึงมีบทเรียนของตัวเองในภายหลัง
+ทั้งสองฝั่ง stream ผ่าน connection เดียวกัน และ — จุดที่ลึกคือ — สองทิศทางนี้ **อิสระต่อกัน** server ไม่ต้องรอให้ client ส่งเสร็จ; message สลับกันไปมาได้อย่างอิสระ นี่คือรูปแบบสำหรับงาน real-time แบบสนทนา: chat, collaboration สด, control channel สองทาง รูปแบบนี้ทรงพลังที่สุดและซับซ้อนที่สุด จึงมีบทเรียนของตัวเองในภายหลัง
 
 ## เลือกยังไง
 
@@ -82,7 +82,7 @@ client ส่ง **ลำดับ** ของ message; server อ่านท�
 | ส่ง upload ก้อนใหญ่หรือ batch แล้วได้ผลลัพธ์เดียว | **Client streaming** |
 | การสนทนาสองทางแบบสด | **Bidirectional** |
 
-สัญชาตญาณที่ดี: **เริ่มที่ unary** หยิบ streaming มาใช้เฉพาะเมื่อข้อมูลมา (หรือออก) ตามเวลาจริง ๆ และการ buffer มันไว้ใน message เดียวจะสิ้นเปลืองหรือช้าเกินไป streaming เพิ่มความซับซ้อนจริง — เรื่อง ordering, flow control, partial failure — ซึ่งโมดูล Streaming จะครอบคลุมเต็ม ๆ
+สัญชาตญาณที่ดี: **เริ่มที่ unary** หยิบ streaming มาใช้เฉพาะเมื่อข้อมูลมา (หรือออก) ตามเวลาจริง ๆ และการ buffer ไว้ใน message เดียวจะสิ้นเปลืองหรือช้าเกินไป streaming เพิ่มความซับซ้อนจริง — เรื่อง ordering, flow control, partial failure — ซึ่งโมดูล Streaming จะครอบคลุมเต็ม ๆ
 
 <Callout title="สรุปหนึ่งบรรทัด">
 call ทั้ง 4 แบบของ gRPC คือไอเดียเดียวที่เติม keyword `stream` ต่างฝั่งกัน: unary (หนึ่ง/หนึ่ง), server streaming (หนึ่ง/หลาย), client streaming (หลาย/หนึ่ง), และ bidirectional (หลาย/หลาย, อิสระต่อกัน) เริ่มที่ unary เป็นค่าเริ่มต้น; stream เฉพาะเมื่อ message ไหลตามเวลาจริง ๆ
@@ -107,10 +107,10 @@ export const quizTypes = [
   {
     q: 'อะไรทำให้ bidirectional streaming ต่างจากการทำ stream อีกสองแบบพร้อมกัน?',
     options: [
-      'มันใช้สอง connection',
+      'ใช้สอง connection',
       'สองทิศทางอิสระต่อกัน — message สลับกันไปมาได้อย่างอิสระ',
-      'มันเร็วกว่าเสมอ',
-      'มัน return error ไม่ได้',
+      'เร็วกว่าเสมอ',
+      'return error ไม่ได้',
     ],
     answer: 1,
   },

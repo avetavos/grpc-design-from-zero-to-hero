@@ -26,7 +26,7 @@ export const deadlineDiagram = `flowchart LR
 
 ## ตั้งเสมอ
 
-กฎเชิงปฏิบัติที่สำคัญที่สุดใน gRPC: **ทุก call ต้องมี deadline** call ที่ไม่มี deadline จะรอตลอดกาลโดย default dependency ที่ช้าหรือค้างตัวเดียวจะผูก request ไว้ ซึ่งผูก goroutine/thread/connection ไว้ และตอน load สูงมันลามเป็น stall ทั้งระบบ — เป็นวิธีคลาสสิกที่ service ช้าตัวเดียวลาก service ที่อยู่เหนือขึ้นไปล้มตามกันหมด
+กฎเชิงปฏิบัติที่สำคัญที่สุดใน gRPC: **ทุก call ต้องมี deadline** call ที่ไม่มี deadline จะรอตลอดกาลโดย default dependency ที่ช้าหรือค้างตัวเดียวจะผูก request ไว้ ซึ่งผูก goroutine/thread/connection ไว้ และตอน load สูงจะลามเป็น stall ทั้งระบบ — เป็นวิธีคลาสสิกที่ service ช้าตัวเดียวลาก service ที่อยู่เหนือขึ้นไปล้มตามกันหมด
 
 นี่คือวิธีตั้ง deadline บน call:
 

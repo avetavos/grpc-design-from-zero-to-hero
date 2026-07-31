@@ -15,11 +15,11 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 **interceptor** คือ middleware เวอร์ชันของ gRPC: function ที่ห่อ call ไว้ เพื่อให้คุณรัน code *ก่อน* และ *หลัง* handler จริง ถ้าคุณเคยใช้ HTTP middleware มาก่อน นี่คือแนวคิดเดียวกัน แต่ใช้กับ RPC แทน route
 
-จุดประสงค์คือเก็บ logic แบบ cross-cutting — logging, authentication, metrics, tracing, retry — ออกจาก business handler คุณเขียน concern นั้นครั้งเดียวเป็น interceptor แล้วมัน apply กับทุก method อัตโนมัติ
+จุดประสงค์คือเก็บ logic แบบ cross-cutting — logging, authentication, metrics, tracing, retry — ออกจาก business handler คุณเขียน concern นั้นครั้งเดียวเป็น interceptor แล้ว interceptor จะ apply กับทุก method อัตโนมัติ
 
 ## chain ห่อ handler ไว้
 
-interceptor ประกอบกันเป็น **chain** แต่ละตัวรับ call, ทำงานของมัน แล้วเรียกตัวถัดไป — จนถึงตัวในสุดคือ handler ของคุณ ตอนไหลกลับออกมา แต่ละ interceptor ตรวจ response หรือ error ได้
+interceptor ประกอบกันเป็น **chain** แต่ละตัวรับ call, ทำงานของตัวเอง แล้วเรียกตัวถัดไป — จนถึงตัวในสุดคือ handler ของคุณ ตอนไหลกลับออกมา แต่ละ interceptor ตรวจ response หรือ error ได้
 
 <Mermaid title="interceptor chain ที่ห่อ handler ไว้" code={chainDiagram} />
 
@@ -33,14 +33,14 @@ export const chainDiagram = `flowchart LR
   auth --> log
   log -->|response| call`;
 
-ลำดับสำคัญ: วาง logging ไว้นอกสุดเพื่อให้มันบันทึกทุกอย่าง, auth ถัดมาเพื่อ reject call ที่ยังไม่ authenticate ก่อนจะถึงงานที่แพง, และ metrics ไว้ใกล้ handler เพื่อให้เวลาที่จับได้สะท้อนงานจริง
+ลำดับสำคัญ: วาง logging ไว้นอกสุดเพื่อให้บันทึกได้ครบทุกอย่าง, auth ถัดมาเพื่อ reject call ที่ยังไม่ authenticate ก่อนจะถึงงานที่แพง, และ metrics ไว้ใกล้ handler เพื่อให้เวลาที่จับได้สะท้อนงานจริง
 
 ## สองแบบ: unary และ streaming
 
-เพราะ gRPC มีทั้ง call แบบ unary และ streaming มันจึงมี interceptor **สอง** ชนิด:
+เพราะ gRPC มีทั้ง call แบบ unary และ streaming จึงมี interceptor **สอง** ชนิด:
 
-- **unary interceptor** ห่อ call แบบ request/response ตัวเดียว มันเห็น request, เรียก handler, แล้วเห็น response — จบในช็อตเดียว
-- **stream interceptor** ห่อ call แบบ streaming โดย default มันไม่เห็นแต่ละ message มันห่อ *stream object* ดังนั้นถ้าจะสังเกตแต่ละ message คุณต้องห่อ method send/receive ของ stream
+- **unary interceptor** ห่อ call แบบ request/response ตัวเดียว interceptor แบบนี้เห็น request, เรียก handler, แล้วเห็น response — จบในช็อตเดียว
+- **stream interceptor** ห่อ call แบบ streaming โดย default ไม่เห็นแต่ละ message เพราะห่อที่ระดับ *stream object* ดังนั้นถ้าจะสังเกตแต่ละ message คุณต้องห่อ method send/receive ของ stream
 
 ความไม่สมมาตรตรงนี้ทำคนสะดุด: logging interceptor ที่เขียนไว้สำหรับ unary จะไม่ log ทุก message ที่ stream อัตโนมัติ — คุณต้องห่อ stream เอง
 
@@ -104,7 +104,7 @@ interceptor ทำงานได้ทั้งสองฝั่ง: **server 
 - **Recovery** — จับ panic/exception ใน handler แล้วเปลี่ยนเป็น status `INTERNAL` ที่สะอาด แทนที่จะทำให้ connection พัง
 
 <Callout title="สรุปหนึ่งบรรทัด">
-interceptor คือ middleware ของ gRPC: chain ที่ห่อทุก call เพื่อให้ logging, auth, metrics และ retry อยู่ในที่เดียว แทนที่จะอยู่ในทุก handler จำไว้ว่ามีสองชนิด — unary ห่อ request/response, stream ห่อ stream object — ดังนั้นการ log call แบบ streaming หมายถึงต้องห่อ send/receive ของมัน ไม่ใช่แค่ห่อ call
+interceptor คือ middleware ของ gRPC: chain ที่ห่อทุก call เพื่อให้ logging, auth, metrics และ retry อยู่ในที่เดียว แทนที่จะอยู่ในทุก handler จำไว้ว่ามีสองชนิด — unary ห่อ request/response, stream ห่อ stream object — ดังนั้นการ log call แบบ streaming หมายถึงต้องห่อ send/receive ของตัวเอง ไม่ใช่แค่ห่อ call
 </Callout>
 
 export const quizIntc = [
@@ -121,7 +121,7 @@ export const quizIntc = [
   {
     q: 'ทำไมควรวาง auth interceptor ไว้ก่อน handler ใน chain?',
     options: [
-      'มันรันเร็วกว่าตรงนั้น',
+      'รันเร็วกว่าตรงนั้น',
       'เพื่อให้ call ที่ยังไม่ authenticate ถูก reject ก่อนถึงงานที่แพง',
       'handler อ่าน metadata ไม่ได้',
       'protobuf บังคับให้ทำ',

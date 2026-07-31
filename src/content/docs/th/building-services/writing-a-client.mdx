@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 gRPC client สร้างจาก object 2 ตัว:
 
-- **channel** — connection ที่อายุยาวไปยัง address ของ server (`host:port`) มันจัดการ HTTP/2 connection ข้างใต้, การ reconnect และ load balancing
+- **channel** — connection ที่อายุยาวไปยัง address ของ server (`host:port`) channel จัดการ HTTP/2 connection ข้างใต้, การ reconnect และ load balancing
 - **stub** — wrapper บาง ๆ ที่มี type สร้าง *จาก* channel เปิด method หนึ่งตัวต่อ `rpc` การเรียก `stub.GetUser(req)` จะส่ง request ผ่าน channel แล้วคืน response
 
 <Mermaid title="channel รับทุก call; stub คือหน้าตาที่มี type" code={clientDiagram} />
@@ -87,7 +87,7 @@ stub ทั้งสองตัวใช้ channel **เดียวกัน*
 
 ความผิดพลาดของ client ที่พบบ่อยที่สุดคือสร้าง channel ใหม่ทุก request channel ต้องตั้ง HTTP/2 connection, name resolution และ state ของ load balancing — ทำแบบนั้นต่อ call คือทิ้งประสิทธิภาพที่ดีที่สุดของ gRPC และอาจทำให้ socket หมดตอน load สูง
 
-**สร้าง channel เดียวต่อ target ตอน startup แล้วแชร์** ให้ทุก call และทุก stub ปิดมันแค่ตอนโปรแกรม shutdown เท่านั้น
+**สร้าง channel เดียวต่อ target ตอน startup แล้วแชร์** ให้ทุก call และทุก stub ปิด channel แค่ตอนโปรแกรม shutdown เท่านั้น
 
 ## blocking vs async
 

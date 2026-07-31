@@ -12,9 +12,9 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## สอง mental model ที่ต่างกัน
 
-REST และ gRPC แก้ปัญหากว้าง ๆ เดียวกัน — โปรแกรมหนึ่งคุยกับอีกโปรแกรมหนึ่ง — แต่มองมันคนละมุม
+REST และ gRPC แก้ปัญหากว้าง ๆ เดียวกัน — โปรแกรมหนึ่งคุยกับอีกโปรแกรมหนึ่ง — แต่มองปัญหาคนละมุม
 
-- **REST** คิดในแง่ **resource** คุณมีคำนาม (`/users/42`) และกระทำกับมันด้วย verb ชุดเล็ก ๆ ที่ตายตัว (`GET`, `POST`, `PUT`, `DELETE`) ข้อมูลมักเป็น JSON และ contract มักเป็นเอกสาร (OpenAPI) หรือแค่ convention
+- **REST** คิดในแง่ **resource** คุณมีคำนาม (`/users/42`) และกระทำกับคำนามนั้นด้วย verb ชุดเล็ก ๆ ที่ตายตัว (`GET`, `POST`, `PUT`, `DELETE`) ข้อมูลมักเป็น JSON และ contract มักเป็นเอกสาร (OpenAPI) หรือแค่ convention
 - **gRPC** คิดในแง่ **procedure** คุณมี method (`GetUser`, `CreateOrder`, `StreamPrices`) แต่ละตัวมี request และ response ที่มี type นิยามไว้ใน `.proto` ข้อมูลเป็น binary protobuf และ contract ก็คือ schema เอง
 
 ไม่มีโมเดลไหน "ถูก" — แต่ละตัว optimize เพื่อคนละเรื่อง
@@ -31,7 +31,7 @@ REST และ gRPC แก้ปัญหากว้าง ๆ เดียว�
 | **codegen / type safety** | เป็น add-on ขึ้นกับเครื่องมือ | มีในตัว ครอบคลุม 11+ ภาษา |
 | **เหมาะกับ** | public API, browser, CRUD ง่าย ๆ | เรียกกันภายในระหว่าง service, latency ต่ำ, streaming |
 
-## ทำไม gRPC ถึงเร็วกว่า (และเมื่อไรที่มันสำคัญ)
+## ทำไม gRPC ถึงเร็วกว่า (และเมื่อไรที่สำคัญ)
 
 มี 2 อย่างที่ทำให้ gRPC มีประสิทธิภาพบน wire:
 
@@ -48,11 +48,11 @@ export const perfDiagram = `flowchart TB
 1. **protobuf เล็กกว่าและ decode ถูกกว่า JSON** field ถูกระบุด้วยหมายเลข ไม่ใช่ชื่อ และค่าถูกแพ็คเป็น binary ไม่มีการ match key แบบ reflective และไม่มีการ parse text
 2. **HTTP/2 multiplexing** ทำให้หลาย call ที่กำลังทำงานอยู่ใช้ connection เดียวร่วมกันได้โดยไม่บล็อกกัน (บทถัดไปจะเจาะลึกเรื่องนี้)
 
-แต่ต้องพูดกันตรง ๆ เรื่อง scale: สำหรับ request ทุกไม่กี่วินาที ความต่างนี้มองไม่เห็นเลย มันจะสำคัญตอนที่คุณยิง **หลายพัน call ต่อวินาที** ระหว่าง service หรือส่ง payload ใหญ่ / แบบ streaming
+แต่ต้องพูดกันตรง ๆ เรื่อง scale: สำหรับ request ทุกไม่กี่วินาที ความต่างนี้มองไม่เห็นเลย จะสำคัญตอนที่คุณยิง **หลายพัน call ต่อวินาที** ระหว่าง service หรือส่ง payload ใหญ่ / แบบ streaming
 
 ## เมื่อไรที่ **ไม่** ควรใช้ gRPC
 
-gRPC เป็น default ที่ดีมากสำหรับ microservice ภายใน แต่มันเป็นเครื่องมือที่ผิดเมื่อ:
+gRPC เป็น default ที่ดีมากสำหรับ microservice ภายใน แต่เป็นเครื่องมือที่ผิดเมื่อ:
 
 - **client เป็น browser และคุณรัน proxy ไม่ได้** browser พูด gRPC ดิบ ๆ ไม่ได้ คุณต้องมี gRPC-Web บวก proxy ที่แปลให้ (Envoy หรือตัวที่มีมาให้) สำหรับ public web API ง่าย ๆ REST มี friction น้อยกว่า
 - **คุณอยากได้ public API ที่เป็นมิตรกับ third-party** developer ภายนอกส่วนใหญ่คาดหวัง `curl`, JSON และหน้า OpenAPI gRPC ยกกำแพงให้เข้ามาใช้ยากขึ้น
@@ -87,10 +87,10 @@ export const quizVs = [
   {
     q: 'ทำไม protobuf ถึงมักประมวลผลเร็วกว่า JSON?',
     options: [
-      'มันถูกบีบอัดด้วย gzip โดย default',
+      'ถูกบีบอัดด้วย gzip โดย default',
       'field ถูกระบุด้วยหมายเลขและแพ็คเป็น binary — ไม่มีการ parse text หรือ match key',
-      'มันข้าม validation ไปเลย',
-      'มัน cache response ให้อัตโนมัติ',
+      'ข้าม validation ไปเลย',
+      'cache response ให้อัตโนมัติ',
     ],
     answer: 1,
   },

@@ -110,7 +110,7 @@ gRPC server จัดการเรื่อง HTTP/2, การ decode protob
 เพราะ server ทำงานบน HTTP/2 multiplexing หลาย call จึงวิ่งเข้า handler ของคุณพร้อมกันบน connection เดียวกัน ใน Go แต่ละ call รันใน goroutine ของตัวเอง; ใน Python มี thread pool คอย serve; ใน Node event loop สลับกันจัดการ นั่นแปลว่า **handler ของคุณต้องรันพร้อมกันได้อย่างปลอดภัย** — ห้ามมี shared mutable state ที่ไม่ได้ป้องกันด้วย synchronization
 
 <Callout title="The one-line takeaway">
-gRPC server คือ: implement handler ที่ generate มา (typed request เข้า, typed response หรือ status error ออก), register มันบน server object แล้ว serve บน port framework จัดการ HTTP/2, การ decode และ dispatch ให้ — คุณแค่เขียน body ของ method และเขียนให้ปลอดภัยต่อ concurrency
+gRPC server คือ: implement handler ที่ generate มา (typed request เข้า, typed response หรือ status error ออก), register handler นั้นบน server object แล้ว serve บน port framework จัดการ HTTP/2, การ decode และ dispatch ให้ — คุณแค่เขียน body ของ method และเขียนให้ปลอดภัยต่อ concurrency
 </Callout>
 
 export const quizServer = [
@@ -148,7 +148,7 @@ export const quizServer = [
     q: 'ทำไม gRPC handler ต้องปลอดภัยต่อ concurrency?',
     options: [
       'เพราะ protobuf เป็น single-thread',
-      'เพราะ HTTP/2 multiplexing ทำให้หลาย call วิ่งผ่านมันพร้อมกัน',
+      'เพราะ HTTP/2 multiplexing ทำให้หลาย call วิ่งผ่าน connection เดียวพร้อมกัน',
       'เพราะ client retry ให้อัตโนมัติ',
       'ไม่ต้อง — handler รันทีละตัวเสมอ',
     ],

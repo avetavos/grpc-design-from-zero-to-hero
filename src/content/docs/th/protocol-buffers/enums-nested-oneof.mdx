@@ -12,7 +12,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## enum: ชุด value ที่มีชื่อ
 
-**enum** คือ field ที่เป็นได้เพียงหนึ่งในชุด integer ที่มีชื่อกำหนดไว้ตายตัว มันสื่อ intent และกัน state ที่ไม่ถูกต้องได้ดีกว่า `int32` หรือ `string` เปล่า ๆ มาก
+**enum** คือ field ที่เป็นได้เพียงหนึ่งในชุด integer ที่มีชื่อกำหนดไว้ตายตัว enum สื่อ intent และกัน state ที่ไม่ถูกต้องได้ดีกว่า `int32` หรือ `string` เปล่า ๆ มาก
 
 ```proto
 enum Status {
@@ -39,7 +39,7 @@ export const enumDiagram = `flowchart TB
   zero --> good["0 = UNSPECIFIED\n→ ปลอดภัย เห็นชัดว่าไม่มีค่า"]
   zero --> bad["0 = ACTIVE\n→ อันตราย ดูเหมือนตั้งใจ"]`;
 
-convention (ที่ใช้ทั่ว API ของ Google) คือตั้งชื่อว่า `<ENUM>_UNSPECIFIED = 0` มันให้ state "ไม่มีค่า" ที่ชัดเจน และเก็บ value ที่มีความหมายไว้ให้การเลือกแบบตั้งใจ การเพิ่ม enum value ใหม่ภายหลังเป็น change ที่ปลอดภัยแบบ backward-compatible — client เก่าจะมองค่าที่ไม่รู้จักเป็น unknown เฉย ๆ
+convention (ที่ใช้ทั่ว API ของ Google) คือตั้งชื่อว่า `<ENUM>_UNSPECIFIED = 0` ค่านี้ให้ state "ไม่มีค่า" ที่ชัดเจน และเก็บ value ที่มีความหมายไว้ให้การเลือกแบบตั้งใจ การเพิ่ม enum value ใหม่ภายหลังเป็น change ที่ปลอดภัยแบบ backward-compatible — client เก่าจะมองค่าที่ไม่รู้จักเป็น unknown เฉย ๆ
 
 ## nested message
 
@@ -59,7 +59,7 @@ message Order {
 }
 ```
 
-nest type เมื่อมันมีความหมายเฉพาะตอนอยู่ใน parent (`Order.LineItem`) และเก็บไว้ระดับบนสุดเมื่อหลาย message ใช้ร่วมกัน (`Address`)
+nest type เมื่อ type นั้นมีความหมายเฉพาะตอนอยู่ใน parent (`Order.LineItem`) และเก็บไว้ระดับบนสุดเมื่อหลาย message ใช้ร่วมกัน (`Address`)
 
 ## oneof: เลือกได้อย่างเดียวจากหลาย field
 

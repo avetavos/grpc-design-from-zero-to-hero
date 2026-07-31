@@ -44,7 +44,7 @@ protobuf มี scalar type มาให้ชุดเล็ก ๆ จุด�
 
 ## ปัญหา "unset กับ zero"
 
-scalar ของ proto3 แบบธรรมดาบอกไม่ได้ว่า *"field นี้ถูกส่งมาไหม?"* — มันบอกได้แค่ value และ field ที่หายไปจะอ่านได้เป็น default
+scalar ของ proto3 แบบธรรมดาบอกไม่ได้ว่า *"field นี้ถูกส่งมาไหม?"* — บอกได้แค่ value และ field ที่หายไปจะอ่านได้เป็น default
 
 <Mermaid title="ไม่มี presence ทำให้ absent กับ zero เหมือนกัน" code={presenceDiagram} />
 
@@ -53,11 +53,11 @@ export const presenceDiagram = `flowchart TB
   b["client ส่ง age = 0"] --> z
   z --> q["server แยกไม่ออก\nว่าเกิดกรณีไหน"]`;
 
-ลองนึกถึง `UpdateUser` request ที่มี `int32 age = 5` ถ้า client อยาก *ล้าง* age มันจะส่ง `0` — แต่ client ที่แค่ไม่ยุ่งกับ age *ก็ส่ง* `0` เหมือนกัน server แยกไม่ออกว่า "set เป็นศูนย์" กับ "ไม่ได้ส่งมา" สำหรับ partial update ความกำกวมนี้คือ bug จริง ๆ
+ลองนึกถึง `UpdateUser` request ที่มี `int32 age = 5` ถ้า client อยาก *ล้าง* age จะส่ง `0` — แต่ client ที่แค่ไม่ยุ่งกับ age *ก็ส่ง* `0` เหมือนกัน server แยกไม่ออกว่า "set เป็นศูนย์" กับ "ไม่ได้ส่งมา" สำหรับ partial update ความกำกวมนี้คือ bug จริง ๆ
 
 ## `optional` เอา presence กลับมา
 
-ภายหลัง proto3 นำ **field presence** กลับมาผ่าน keyword `optional` scalar ที่เป็น `optional` จะ track ว่ามันถูก set ชัด ๆ หรือไม่ ทำให้ generated code มี `has_age()` / `hasAge` ให้เช็ก
+ภายหลัง proto3 นำ **field presence** กลับมาผ่าน keyword `optional` scalar ที่เป็น `optional` จะ track ว่าถูก set ชัด ๆ หรือไม่ ทำให้ generated code มี `has_age()` / `hasAge` ให้เช็ก
 
 ```proto
 message UpdateUserRequest {
@@ -89,7 +89,7 @@ export const quizScalar = [
       'null',
       'string ว่าง ""',
       'คำว่า "default"',
-      'มัน throw error',
+      'throw error',
     ],
     answer: 1,
   },

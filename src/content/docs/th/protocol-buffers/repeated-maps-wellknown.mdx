@@ -12,7 +12,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## repeated field คือ list
 
-ใส่ `repeated` เข้าไปที่ field แล้วมันจะกลายเป็น list ที่มีลำดับของ type นั้น — มีค่าได้ตั้งแต่ศูนย์ตัวขึ้นไป
+ใส่ `repeated` เข้าไปที่ field แล้ว field นั้นจะกลายเป็น list ที่มีลำดับของ type นั้น — มีค่าได้ตั้งแต่ศูนย์ตัวขึ้นไป
 
 ```proto
 message Playlist {
@@ -22,7 +22,7 @@ message Playlist {
 }
 ```
 
-repeated field รักษาลำดับไว้ และ list ว่างก็คือ default — คุณไม่เคยส่ง "null กับ empty" แยกกัน มันคือสิ่งเดียวกัน สำหรับ list ของ numeric scalar protobuf ใช้ **packed encoding** เป็น default ใน proto3 คือเก็บค่าติดกันโดยไม่มี tag ต่อ element ทำให้ array ตัวเลขขนาดใหญ่กะทัดรัด
+repeated field รักษาลำดับไว้ และ list ว่างก็คือ default — คุณไม่เคยส่ง "null กับ empty" แยกกัน ทั้งสองอย่างคือสิ่งเดียวกัน สำหรับ list ของ numeric scalar protobuf ใช้ **packed encoding** เป็น default ใน proto3 คือเก็บค่าติดกันโดยไม่มี tag ต่อ element ทำให้ array ตัวเลขขนาดใหญ่กะทัดรัด
 
 ## map คือคู่ key/value
 
@@ -53,7 +53,7 @@ export const wktDiagram = `flowchart LR
 
 - **`Timestamp`** และ **`Duration`** — จุดเวลาที่แม่นยำและช่วงเวลา ควรใช้พวกนี้แทน `int64` ดิบ ๆ ที่แปลว่า "millisecond ตั้งแต่อะไรสักอย่าง" เสมอ
 - **wrapper** (`Int32Value`, `StringValue`, `BoolValue`, …) — กล่อง message ที่ห่อ scalar ไว้เพื่อให้ nullable เป็นทางเลือกเก่าก่อนจะมี keyword `optional` แต่ยังพบบ่อยใน API ที่มีอยู่
-- **`Any`** — บรรจุ message ที่ serialize แล้วแบบอะไรก็ได้พร้อม type URL ของมัน สำหรับ payload ที่ dynamic จริง ๆ ทรงพลังแต่ทำลาย static typing ใช้อย่างประหยัด
+- **`Any`** — บรรจุ message ที่ serialize แล้วแบบอะไรก็ได้พร้อม type URL ของตัวเอง สำหรับ payload ที่ dynamic จริง ๆ ทรงพลังแต่ทำลาย static typing ใช้อย่างประหยัด
 - **`Struct`** — ข้อมูลคล้าย JSON แบบอิสระ (object, list, value) เมื่อ shape ไม่รู้ล่วงหน้าจริง ๆ
 - **`Empty`** — message ที่ไม่มี field สำหรับ RPC ที่ไม่รับหรือไม่คืนอะไร
 - **`FieldMask`** — list ของ field path เป็นวิธีมาตรฐานในการบอกว่า "update เฉพาะ field เหล่านี้" ใน API แบบ partial update

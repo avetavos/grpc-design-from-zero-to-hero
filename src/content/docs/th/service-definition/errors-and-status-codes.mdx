@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 gRPC ไม่ใช้ HTTP status code ทุก call จบด้วย **gRPC status**: `code` ที่เป็นตัวเลข, `message` ที่มนุษย์อ่านได้ (optional), และ `details` แบบมีโครงสร้าง (optional) call ที่สำเร็จ return `OK`; อย่างอื่นคือ error ที่ client รับมาเป็น status ที่มี type ไม่ใช่ response body ที่ต้อง parse
 
-การเลือก code ที่ถูกต้องคือการตัดสินใจออกแบบ — client แตกเงื่อนไขจากมัน, retry จากมัน, และปลุกคุณกลางดึกจากมัน code ที่คลุมเครือทำให้ API น่าหงุดหงิด; code ที่แม่นยำทำให้มันอธิบายตัวเองได้
+การเลือก code ที่ถูกต้องคือการตัดสินใจออกแบบ — client แตกเงื่อนไขจาก code, retry ตาม code และถูกปลุกกลางดึกด้วย code code ที่คลุมเครือทำให้ API น่าหงุดหงิด; code ที่แม่นยำทำให้ API อธิบายตัวเองได้
 
 ## status code ที่คุณจะใช้จริง
 
@@ -40,7 +40,7 @@ gRPC ไม่ใช้ HTTP status code ทุก call จบด้วย **gRP
 - **`INVALID_ARGUMENT` vs `FAILED_PRECONDITION`** — ตัวแรกหมายถึง "input คุณผิด แก้แล้วจะช่วยได้"; ตัวหลังหมายถึง "input คุณโอเค แต่ระบบไม่ได้อยู่ใน state ที่ทำสำเร็จได้"
 - **`UNAUTHENTICATED` vs `PERMISSION_DENIED`** — ตัวแรกหมายถึง "ฉันไม่รู้ว่าคุณเป็นใคร"; ตัวหลังหมายถึง "ฉันรู้ว่าคุณเป็นใคร และคุณไม่ได้รับอนุญาต"
 
-`UNAVAILABLE` และ `DEADLINE_EXCEEDED` สำคัญต่อการ retry: มันบอกว่าเป็น failure *ชั่วคราว* client (และ interceptor) จึงมัก retry มัน ในขณะที่ `INVALID_ARGUMENT` ไม่ควร retry แบบเดิมซ้ำเด็ดขาด
+`UNAVAILABLE` และ `DEADLINE_EXCEEDED` สำคัญต่อการ retry: ทั้งคู่บอกว่าเป็น failure *ชั่วคราว* client (และ interceptor) จึงมัก retry ต่อ ส่วน `INVALID_ARGUMENT` ไม่ควร retry แบบเดิมซ้ำเด็ดขาด
 
 ## การ return error
 
@@ -107,7 +107,7 @@ export const errorDiagram = `flowchart LR
 detail type มาตรฐาน (`BadRequest`, `ErrorInfo`, `QuotaFailure`, `RetryInfo` และอื่น ๆ จาก `google.rpc`) ทำให้ server บอกได้แม่น ๆ ว่า "field `email` ไม่ถูกต้อง" หรือ "retry หลังจาก 3 วินาที" และทำให้ client react แบบ programmatic ได้ ใช้ code เปล่า ๆ สำหรับเคสทั่วไป; หยิบ rich details มาใช้เมื่อ client ต้องการ error data แบบมีโครงสร้างจริง ๆ
 
 <Callout title="สรุปหนึ่งบรรทัด">
-call ของ gRPC จบด้วย **status** — `code`, `message`, และ `details` (optional) — ไม่ใช่ HTTP code เลือก code ให้แม่นยำ (`NOT_FOUND` vs `INVALID_ARGUMENT` vs `FAILED_PRECONDITION`; `UNAUTHENTICATED` vs `PERMISSION_DENIED`) เพราะ client retry และแตกเงื่อนไขจากมัน หยิบ `google.rpc.Status` details มาใช้เมื่อ client ต้องการรายละเอียดแบบ machine-readable
+call ของ gRPC จบด้วย **status** — `code`, `message`, และ `details` (optional) — ไม่ใช่ HTTP code เลือก code ให้แม่นยำ (`NOT_FOUND` vs `INVALID_ARGUMENT` vs `FAILED_PRECONDITION`; `UNAUTHENTICATED` vs `PERMISSION_DENIED`) เพราะ client retry และแตกเงื่อนไขจาก code เหล่านี้ หยิบ `google.rpc.Status` details มาใช้เมื่อ client ต้องการรายละเอียดแบบ machine-readable
 </Callout>
 
 export const quizErrors = [
@@ -129,7 +129,7 @@ export const quizErrors = [
   {
     q: 'ความต่างระหว่าง UNAUTHENTICATED กับ PERMISSION_DENIED คืออะไร?',
     options: [
-      'มันเหมือนกัน',
+      'เหมือนกัน',
       'UNAUTHENTICATED = เราไม่รู้ว่าคุณเป็นใคร; PERMISSION_DENIED = เรารู้ และคุณไม่ได้รับอนุญาต',
       'PERMISSION_DENIED ใช้กับ admin เท่านั้น',
       'UNAUTHENTICATED หมายถึง server ล่ม',

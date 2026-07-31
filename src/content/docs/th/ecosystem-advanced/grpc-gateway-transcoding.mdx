@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ในโมดูล foundations เราพูดไว้ว่าระบบเดียวกันมักอยากได้ gRPC ภายในและ REST ที่ขอบนอก — call ที่เร็วและ typed ระหว่าง service ของตัวเอง แต่เป็น JSON ธรรมดาสำหรับ third party, browser และการเช็คด้วย `curl` เร็ว ๆ
 
-**Transcoding** ให้คุณ serve ทั้งสองจาก `.proto` *เดียวกัน* คุณ annotate แต่ละ method ด้วย REST route ที่มันควรตอบด้วย แล้ว **reverse proxy** ที่ generate มาจะแปล request แบบ JSON/HTTP ที่เข้ามาให้เป็น gRPC call และแปลง protobuf response กลับเป็น JSON
+**Transcoding** ให้คุณ serve ทั้งสองจาก `.proto` *เดียวกัน* คุณ annotate แต่ละ method ด้วย REST route ที่ควรตอบด้วย แล้ว **reverse proxy** ที่ generate มาจะแปล request แบบ JSON/HTTP ที่เข้ามาให้เป็น gRPC call และแปลง protobuf response กลับเป็น JSON
 
 ## Annotate ที่ method
 
@@ -52,7 +52,7 @@ export const gwDiagram = `flowchart TB
   ext["external client\nGET /v1/users/42"] --> gw["grpc-gateway\nreverse proxy"]
   gw -->|translates JSON↔protobuf| svc`;
 
-gateway เป็น code ที่ generate มา (grpc-gateway ใน ecosystem ของ Go; Envoy ก็ทำ transcoding ผ่าน filter ได้) มัน parse URL กับ JSON, สร้าง protobuf request, เรียก gRPC method จริง แล้ว marshal reply กลับเป็น JSON — ทั้งหมดขับเคลื่อนด้วย annotation
+gateway เป็น code ที่ generate มา (grpc-gateway ใน ecosystem ของ Go; Envoy ก็ทำ transcoding ผ่าน filter ได้) ตัว gateway จะ parse URL กับ JSON, สร้าง protobuf request, เรียก gRPC method จริง แล้ว marshal reply กลับเป็น JSON — ทั้งหมดขับเคลื่อนด้วย annotation
 
 <Tabs syncKey="lang">
   <TabItem label="Go">

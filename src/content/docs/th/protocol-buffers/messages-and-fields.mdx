@@ -54,14 +54,14 @@ export const wireDiagram = `flowchart LR
 - ค่าสูงสุดคือ **536,870,911** (2^29 − 1) ซึ่งคุณไม่มีทางใช้ถึง
 
 <Callout title="กฎใช้งานจริง">
-ให้ number ต่ำ (1–15) กับ field ที่ hot และมีอยู่เสมอ เมื่อ number ถูก assign และปล่อยออกไปแล้ว ให้ถือว่ามันถาวร — value ที่มันชี้ตอนนี้เป็นส่วนหนึ่งของ wire contract ของคุณแล้ว
+ให้ number ต่ำ (1–15) กับ field ที่ hot และมีอยู่เสมอ เมื่อ number ถูก assign และปล่อยออกไปแล้ว ให้ถือว่าถาวร — value ที่ชี้ตอนนี้เป็นส่วนหนึ่งของ wire contract ของคุณแล้ว
 </Callout>
 
 ## ห้าม reuse number — ให้ reserve แทน
 
-กฎหนึ่งข้อที่กัน bug ร้ายแรงที่สุดของ protobuf: **เมื่อลบ field ห้ามให้ number ของมันถูก reuse เด็ดขาด** ถ้า client เก่ายังส่ง field `3` เป็น string แต่ server ใหม่เอา `3` ไปใช้เป็น `int64` bytes จะถูกตีความผิด — เป็น failure ที่เงียบและทำให้ข้อมูลเสีย
+กฎหนึ่งข้อที่กัน bug ร้ายแรงที่สุดของ protobuf: **เมื่อลบ field ห้ามให้ number ของตัวเองถูก reuse เด็ดขาด** ถ้า client เก่ายังส่ง field `3` เป็น string แต่ server ใหม่เอา `3` ไปใช้เป็น `int64` bytes จะถูกตีความผิด — เป็น failure ที่เงียบและทำให้ข้อมูลเสีย
 
-protobuf ให้ `reserved` ไว้ล็อก number ที่ปลดระวางแล้ว (และชื่อเก่าของมันด้วย) เพื่อให้ compiler ปฏิเสธการ reuse:
+protobuf ให้ `reserved` ไว้ล็อก number ที่ปลดระวางแล้ว (และชื่อเก่าของตัวเองด้วย) เพื่อให้ compiler ปฏิเสธการ reuse:
 
 ```proto
 message User {
@@ -74,10 +74,10 @@ message User {
 }
 ```
 
-ตอนนี้ใครก็ตามที่พยายามเพิ่ม field `3` ใหม่จะเจอ compile error แทนที่จะเป็น incident บน production เราจะกลับมาลงลึกเรื่องวินัยนี้ในบท *Evolving Schemas* — แต่ให้เริ่มนิสัยตั้งแต่ตอนนี้: **ลบ field แล้ว reserve number ของมัน**
+ตอนนี้ใครก็ตามที่พยายามเพิ่ม field `3` ใหม่จะเจอ compile error แทนที่จะเป็น incident บน production เราจะกลับมาลงลึกเรื่องวินัยนี้ในบท *Evolving Schemas* — แต่ให้เริ่มนิสัยตั้งแต่ตอนนี้: **ลบ field แล้ว reserve number ของตัวเอง**
 
 <Callout title="สรุปหนึ่งบรรทัด">
-message คือ field ที่มี type และตัวตนจริงของแต่ละ field คือ **number** ไม่ใช่ชื่อ number ทำให้ message กะทัดรัดและ rename ได้ฟรี — แต่ก็แปลว่า number เป็นของถาวร ให้ field ที่ hot ใช้ number byte เดียว 1–15 และเมื่อลบ field ให้ `reserved` number ของมันไว้ตลอดกาล
+message คือ field ที่มี type และตัวตนจริงของแต่ละ field คือ **number** ไม่ใช่ชื่อ number ทำให้ message กะทัดรัดและ rename ได้ฟรี — แต่ก็แปลว่า number เป็นของถาวร ให้ field ที่ hot ใช้ number byte เดียว 1–15 และเมื่อลบ field ให้ `reserved` number ของตัวเองไว้ตลอดกาล
 </Callout>
 
 export const quizMsg = [

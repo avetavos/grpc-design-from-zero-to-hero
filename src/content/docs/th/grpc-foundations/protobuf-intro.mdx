@@ -12,12 +12,12 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## protobuf คือ contract
 
-**Protocol Buffers** (protobuf) คือภาษาที่คุณใช้อธิบายข้อมูลและ service ของคุณ และเป็น format ที่ข้อมูลนั้นเดินทางไปด้วย มันเล่น 2 บทบาทพร้อมกัน:
+**Protocol Buffers** (protobuf) คือภาษาที่คุณใช้อธิบายข้อมูลและ service ของคุณ และเป็น format ที่ข้อมูลนั้นเดินทางไปด้วย ทำหน้าที่ 2 บทบาทพร้อมกัน:
 
 - **ภาษา schema** — ไฟล์ `.proto` ที่ประกาศ message และ service ของคุณในแบบที่ภาษาใดก็ compile ได้
 - **wire format** — binary encoding ที่กระชับ ซึ่ง message เหล่านั้นใช้ตอนวิ่งข้าม network
 
-ใน gRPC protobuf *คือ* contract ทุกอย่าง — type safety, codegen, ประสิทธิภาพ — ไหลมาจากมัน
+ใน gRPC protobuf *คือ* contract ทุกอย่าง — type safety, codegen, ประสิทธิภาพ — ไหลมาจาก contract นี้
 
 ## message คือ field ที่มีหมายเลข
 
@@ -33,7 +33,7 @@ message User {
 }
 ```
 
-`= 1`, `= 2`, `= 3` คือ **field number** และมันคือแนวคิดที่สำคัญที่สุดใน protobuf บน wire protobuf **ไม่** ส่งชื่อ field มันส่ง *หมายเลข* ของ field กับค่า ดังนั้น `name = "Ada"` จึงกลายเป็นประมาณว่า "field 2, string, Ada" — tag ไม่กี่ byte บวกกับค่า
+`= 1`, `= 2`, `= 3` คือ **field number** และเป็นแนวคิดที่สำคัญที่สุดใน protobuf เวลาส่งจริงบน wire นั้น protobuf **ไม่** ส่งชื่อ field แต่ส่ง *หมายเลข* ของ field คู่กับค่า ดังนั้น `name = "Ada"` จึงกลายเป็นประมาณว่า "field 2, string, Ada" — tag ไม่กี่ byte บวกกับค่า
 
 <Mermaid title="JSON ส่งชื่อทุกครั้ง; protobuf ส่ง tag ที่เป็นหมายเลขเล็ก ๆ" code={encodeDiagram} />
 
@@ -47,12 +47,12 @@ export const encodeDiagram = `flowchart LR
 
 การตัดสินใจออกแบบอย่างเดียวนี้ให้ผลตามมา 2 อย่าง:
 
-1. **มันกระชับ** ไม่มีชื่อ key ซ้ำ ไม่มีเครื่องหมายคำพูด ไม่มี whitespace — มีแค่ tag กับค่า
-2. **มัน evolve ได้** เพราะ *หมายเลข* คือตัวระบุ field คุณจึง rename `name` เป็น `full_name` ใน `.proto` ได้โดยไม่ทำให้ใครพัง — wire เห็นแค่ field `2` มาตลอด นี่คือรากฐานของการทำ schema evolution อย่างปลอดภัย (มีทั้งบทรออยู่ข้างหน้า)
+1. **กระชับ** ไม่มีชื่อ key ซ้ำ ไม่มีเครื่องหมายคำพูด ไม่มี whitespace — มีแค่ tag กับค่า
+2. **evolve ได้** เพราะ *หมายเลข* คือตัวระบุ field คุณจึง rename `name` เป็น `full_name` ใน `.proto` ได้โดยไม่ทำให้ใครพัง — wire เห็นแค่ field `2` มาตลอด นี่คือรากฐานของการทำ schema evolution อย่างปลอดภัย (มีทั้งบทรออยู่ข้างหน้า)
 
 ## ทำไมไม่ใช้ JSON ไปเลย?
 
-JSON เยี่ยมมากสำหรับ public API — อ่านออก, ใช้ได้ทุกที่, setup เป็นศูนย์ แต่สำหรับการเรียกกันระหว่าง service ที่ปริมาณสูง มันมี cost จริง ๆ ที่ protobuf เลี่ยงได้:
+JSON เยี่ยมมากสำหรับ public API — อ่านออก, ใช้ได้ทุกที่, setup เป็นศูนย์ แต่สำหรับการเรียกกันระหว่าง service ที่ปริมาณสูง ต้นทุนพวกนี้มีจริง และ protobuf เลี่ยงได้:
 
 | | JSON | Protobuf |
 |--|------|----------|
@@ -66,10 +66,10 @@ trade-off คือความตรงไปตรงมาอีกด้า�
 
 ## workflow แบบ contract-first
 
-วินัยที่ protobuf บังคับคือ **เขียน contract ก่อน** ก่อนที่ทีมไหนจะเขียน code ทั้งสองฝั่งตกลง `.proto` กันก่อน: นี่คือ message เหล่านี้, นี่คือ method เหล่านี้ แล้ว codegen ก็สร้าง type ที่ตรงกันขึ้นมาทั้งสองฝั่ง schema จะ drift เงียบ ๆ ไม่ได้ เพราะทั้ง client และ server generate มาจากมัน
+วินัยที่ protobuf บังคับคือ **เขียน contract ก่อน** ก่อนที่ทีมไหนจะเขียน code ทั้งสองฝั่งตกลง `.proto` กันก่อน: นี่คือ message เหล่านี้, นี่คือ method เหล่านี้ แล้ว codegen ก็สร้าง type ที่ตรงกันขึ้นมาทั้งสองฝั่ง schema จะ drift เงียบ ๆ ไม่ได้ เพราะทั้ง client และ server generate มาจากไฟล์เดียวกัน
 
 <Callout title="สรุปในบรรทัดเดียว">
-Protocol Buffers เป็นทั้งภาษา schema และ binary wire format ที่กระชับ ทริกสำคัญของมันคือ **field number**: wire พก tag ที่เป็นหมายเลข ไม่ใช่ชื่อ — ซึ่งทำให้ message เล็ก, decode เร็ว และ rename ปลอดภัย schema แบบ contract-first นี้คือสิ่งที่ทุก feature อื่นของ gRPC สร้างต่อขึ้นมา
+Protocol Buffers เป็นทั้งภาษา schema และ binary wire format ที่กระชับ ทริกสำคัญคือ **field number**: wire พก tag ที่เป็นหมายเลข ไม่ใช่ชื่อ — ซึ่งทำให้ message เล็ก, decode เร็ว และ rename ปลอดภัย schema แบบ contract-first นี้คือสิ่งที่ทุก feature อื่นของ gRPC สร้างต่อขึ้นมา
 </Callout>
 
 export const quizProto = [
@@ -106,10 +106,10 @@ export const quizProto = [
   {
     q: 'ข้อเสียหลักของ protobuf เมื่อเทียบกับ JSON คืออะไร?',
     options: [
-      'มัน parse ช้ากว่า',
-      'มันคนอ่านไม่ออกบน wire ถ้าไม่มี `.proto`',
-      'มันแทนข้อมูลแบบซ้อนกันไม่ได้',
-      'มันใช้ได้แค่ใน Go',
+      'ช้ากว่าตอน parse',
+      'คนอ่านไม่ออกบน wire ถ้าไม่มี `.proto`',
+      'แทนข้อมูลแบบซ้อนกันไม่ได้',
+      'ใช้ได้แค่ใน Go',
     ],
     answer: 1,
   },

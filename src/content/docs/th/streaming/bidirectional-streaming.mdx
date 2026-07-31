@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 **Bidirectional streaming** เปิด stream เดียวที่ *ทั้ง* client และ server ส่ง message ได้ อิสระและพร้อมกัน ไม่มีฝั่งไหนต้องรออีกฝั่ง message ไหลไปทางไหนก็ได้เมื่อมีอะไรจะพูด
 
-นี่คือรูปแบบสำหรับ session แบบโต้ตอบจริง ๆ: chat, state ของ multiplayer game, การแก้เอกสารร่วมกัน หรือ protocol ไหนก็ตามที่ request กับ response ของมันสลับกันไปมาแทนที่จะเป็นจังหวะ lock-step
+นี่คือรูปแบบสำหรับ session แบบโต้ตอบจริง ๆ: chat, state ของ multiplayer game, การแก้เอกสารร่วมกัน หรือ protocol ไหนก็ตามที่ request กับ response ของตัวเองสลับกันไปมาแทนที่จะเป็นจังหวะ lock-step
 
 <Mermaid title="Bidirectional streaming: message อิสระ สลับกันไปมา" code={bdDiagram} />
 
@@ -104,12 +104,12 @@ server implementation ก็ทำแบบเดียวกัน: วน `Rec
 ## หมายเหตุด้านการออกแบบ
 
 - **ลำดับเป็นแบบ per-direction** message ที่ client ส่งไปถึง server ตามลำดับ; message ที่ server ส่งไปถึง client ตามลำดับ แต่สองทิศทางเป็นอิสระต่อกัน — ไม่มีลำดับรวมระหว่าง message ของ client กับของ server
-- **half-close เป็นแบบข้างเดียว** `CloseSend` (client) หรือการ return (server) จบการส่งของ *ฝั่งนั้น* ในขณะที่อีกฝั่ง stream ต่อได้ call จบสมบูรณ์ก็ต่อเมื่อทั้งสองทิศปิด
+- **half-close เป็นแบบข้างเดียว** `CloseSend` (client) หรือการ return (server) จบการส่งของ *ฝั่งนั้น* ส่วนอีกฝั่ง stream ต่อได้ call จบสมบูรณ์ก็ต่อเมื่อทั้งสองทิศปิด
 - **อ่านและเขียนพร้อมกัน** อย่า block receive loop ไว้หลัง send loop ไม่งั้น flow-control window เต็มแล้ว deadlock ได้ (บทถัดไป)
 - **นี่ไม่ใช่ message broker** bidi stream เป็นแบบ point-to-point ระหว่าง client 1 ตัวกับ server 1 ตัว การกระจายไปหา client *จำนวนมาก* (chat room) เป็น application logic ที่อยู่ข้างบน มักมี pub/sub รองรับ
 
 <Callout title="สรุปหนึ่งบรรทัด">
-Bidirectional streaming ใส่ `stream` ทั้งที่ request และ response แต่ละฝั่งจึงส่งเมื่อไรก็ได้บน connection เดียว อ่านและเขียนพร้อมกัน, จำไว้ว่าลำดับรับประกันแค่ per-direction และมองมันเป็น point-to-point — การกระจายไปหา client จำนวนมากเป็นงานของคุณ ไม่ใช่ของ stream
+Bidirectional streaming ใส่ `stream` ทั้งที่ request และ response แต่ละฝั่งจึงส่งเมื่อไรก็ได้บน connection เดียว อ่านและเขียนพร้อมกัน, จำไว้ว่าลำดับรับประกันแค่ per-direction และมอง stream นี้เป็น point-to-point — การกระจายไปหา client จำนวนมากเป็นงานของคุณ ไม่ใช่ของ stream
 </Callout>
 
 export const quizBD = [

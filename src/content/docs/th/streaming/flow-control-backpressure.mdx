@@ -14,11 +14,11 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 stream ปล่อยให้ producer ส่งเร็วเท่าที่ทำได้ แต่ถ้า consumer อ่านช้าล่ะ? ถ้าไม่มีเบรก ฝั่งที่เร็วจะกอง message ไว้ใน memory เร็วกว่าที่ฝั่งช้าจะระบายออก — จนกระทั่งบางอย่าง memory หมดแล้วล้ม
 
-เบรกนั้นคือ **flow control** และแรงที่มันดันกลับไปที่ producer คือ **backpressure**
+เบรกนั้นคือ **flow control** และแรงที่ดันกลับไปที่ producer คือ **backpressure**
 
 ## HTTP/2 flow control แบบได้มาฟรี
 
-เพราะ gRPC วิ่งบน HTTP/2 มันจึงได้ flow control ของ HTTP/2 มาอัตโนมัติ แต่ละฝั่งประกาศ **window** — จำนวน byte ที่ตอนนี้ยินดีรับ เมื่อ data มาถึงและถูกบริโภค ผู้รับก็เติม window; ถ้าผู้รับหยุดบริโภค window ก็ระบายจนเป็นศูนย์แล้วผู้ส่งต้องหยุด
+เพราะ gRPC วิ่งบน HTTP/2 จึงได้ flow control ของ HTTP/2 มาอัตโนมัติ แต่ละฝั่งประกาศ **window** — จำนวน byte ที่ตอนนี้ยินดีรับ เมื่อ data มาถึงและถูกบริโภค ผู้รับก็เติม window; ถ้าผู้รับหยุดบริโภค window ก็ระบายจนเป็นศูนย์แล้วผู้ส่งต้องหยุด
 
 <Mermaid title="window เต็มหยุด producer จนกว่า consumer จะตามทัน" code={fcDiagram} />
 
@@ -28,13 +28,13 @@ export const fcDiagram = `flowchart LR
   win -. "window ว่าง →\nSend block" .-> prod
   cons -. "consume →\nเติม window" .-> win`;
 
-ผลก็คือ: เมื่อคุณเรียก `Send` แล้ว window เต็ม `Send` จะ **block** (หรือใน callback API จะส่งสัญญาณ "not ready"/`drain`) จนกว่า consumer จะตามทัน transport กำลังบอก producer ว่า "ช้าลงหน่อย" นั่นคือ backpressure ที่ทำงานถูกต้อง — และมันเกิดขึ้นโดยที่คุณไม่ต้องเขียนอะไรเลย
+ผลก็คือ: เมื่อคุณเรียก `Send` แล้ว window เต็ม `Send` จะ **block** (หรือใน callback API จะส่งสัญญาณ "not ready"/`drain`) จนกว่า consumer จะตามทัน transport กำลังบอก producer ว่า "ช้าลงหน่อย" นั่นคือ backpressure ที่ทำงานถูกต้อง — และเกิดขึ้นโดยที่คุณไม่ต้องเขียนอะไรเลย
 
-## จุดที่มันพัง: การทำลาย backpressure ของตัวเอง
+## จุดที่พัง: การทำลาย backpressure ของตัวเอง
 
-อันตรายไม่ใช่ HTTP/2 — มัน handle flow control ได้ดี อันตรายคือ code ที่ **buffer อ้อม** backpressure แล้วดึงปัญหา memory ไม่จำกัดกลับมา:
+อันตรายไม่ใช่ HTTP/2 — ตัว protocol handle flow control ได้ดีอยู่แล้ว อันตรายคือ code ที่ **buffer อ้อม** backpressure แล้วดึงปัญหา memory ไม่จำกัดกลับมา:
 
-- **อ่านทุกอย่างเข้า slice/list ก่อนประมวลผล** ถ้า receive loop ของคุณ append ทุก message เข้า list ใน memory คุณเปลี่ยน stream ที่มีขอบเขตให้กลายเป็น memory ไม่จำกัด ประมวลผลแต่ละ message ตอนที่มันมาถึง
+- **อ่านทุกอย่างเข้า slice/list ก่อนประมวลผล** ถ้า receive loop ของคุณ append ทุก message เข้า list ใน memory คุณเปลี่ยน stream ที่มีขอบเขตให้กลายเป็น memory ไม่จำกัด ประมวลผลแต่ละ message ตอนที่มาถึง
 - **send loop ที่ไม่เคย block** ใน runtime แบบ callback (Node) การเมิน return value ของ `write()` / event `drain` ทำให้คุณ queue data ไม่จำกัดไว้ใน buffer ภายในของ library เคารพสัญญาณ "รอก่อน"
 - **ไม่อ่านขณะที่เขียน** บน bidi stream ถ้าคุณส่งอย่างเดียวไม่เคยรับ flow-control acknowledgement ของ peer จะกอง แล้วทั้งสองฝั่ง deadlock ได้ รัน receive loop พร้อมกันเสมอ
 
@@ -46,7 +46,7 @@ export const fcDiagram = `flowchart LR
 - **รู้ว่าเมื่อไร**ไม่**ควร stream** ถ้า consumer ที่ช้าจะบังคับให้ server ถือ state หรือ memory ไว้นาน stream อาจกลายเป็นภาระ บางครั้ง unary call เล็ก ๆ หลายอัน (retry และ rebalance ได้อิสระ) เป็นดีไซน์ที่ปลอดภัยกว่า stream ยาว 1 อัน — trade-off เดียวกับใน intro ของโมดูลนี้
 
 <Callout title="สรุปหนึ่งบรรทัด">
-gRPC ได้ flow control ฟรีจาก HTTP/2: window ที่เต็มทำให้ `Send` block ซึ่งคือ backpressure ที่บอก producer ให้ช้าลง โหมดพังคือ code ของคุณเองที่ buffer อ้อมมัน — อ่านทั้ง stream เข้า memory, เมิน `drain` หรือไม่อ่านขณะเขียน ประมวลผลแต่ละ message ตอนที่มันมาถึง และให้ backpressure ส่งย้อนไปถึงต้นทาง
+gRPC ได้ flow control ฟรีจาก HTTP/2: window ที่เต็มทำให้ `Send` block ซึ่งคือ backpressure ที่บอก producer ให้ช้าลง โหมดพังคือ code ของคุณเองที่ buffer อ้อม flow control — อ่านทั้ง stream เข้า memory, เมิน `drain` หรือไม่อ่านขณะเขียน ประมวลผลแต่ละ message ตอนที่มาถึง และให้ backpressure ส่งย้อนไปถึงต้นทาง
 </Callout>
 
 export const quizFC = [
@@ -74,7 +74,7 @@ export const quizFC = [
     q: 'วิธีที่ developer เผลอทำลาย backpressure บ่อยที่สุดคืออะไร?',
     options: [
       'การใช้ TLS',
-      'อ่านทั้ง stream เข้า list ใน memory แทนที่จะประมวลผลแต่ละ message ตอนที่มันมาถึง',
+      'อ่านทั้ง stream เข้า list ใน memory แทนที่จะประมวลผลแต่ละ message ตอนที่มาถึง',
       'การตั้ง deadline',
       'การใช้ server streaming',
     ],

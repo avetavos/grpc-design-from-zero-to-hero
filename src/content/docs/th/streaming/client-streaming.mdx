@@ -15,7 +15,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 **Client streaming** กลับด้านจาก server streaming: client ส่ง *ลำดับ* ของ message บน stream ที่เปิดค้างไว้ แล้ว server ตอบกลับด้วย response เดียว — แต่หลังจาก client บอกว่าส่งเสร็จแล้วเท่านั้น
 
-มันเหมาะกับการป้อน data *เข้า* service: upload ไฟล์เป็น chunk, รับ metric เป็น batch หรือส่งหลาย record ที่ server รวบเป็นสรุปเดียว
+รูปแบบนี้เหมาะกับการป้อน data *เข้า* service: upload ไฟล์เป็น chunk, รับ metric เป็น batch หรือส่งหลาย record ที่ server รวบเป็นสรุปเดียว
 
 <Mermaid title="Client streaming: stream ของ request, 1 response" code={csDiagram} />
 
@@ -148,10 +148,10 @@ server อ่านทุก message, สะสม state, แล้ว return re
 - **response มาหลัง half-close เท่านั้น** client อย่าคาดหวังคำตอบกลาง stream response เดียวคือสัญญาณว่า upload ทั้งก้อนถูกประมวลผลแล้ว
 - **จำกัดยอดรวม** client stream ได้ไม่รู้จบ server ควรจำกัดว่าจะรับแค่ไหน (จำนวน message หรือขนาด) เพื่อกัน memory หรืองานที่ไม่จำกัด
 - **ลำดับถูกรักษาไว้** server จึงพึ่งได้ว่าได้รับ sample ตามลำดับที่ส่ง
-- **ทั้งสองฝั่งจบก่อนด้วย error ได้** ถ้า server ปฏิเสธ batch กลางทาง (เช่น quota เกิน) มัน return error status แทน summary ได้ — `CloseAndRecv` ของ client จะเจอ error นั้น
+- **ทั้งสองฝั่งจบก่อนด้วย error ได้** ถ้า server ปฏิเสธ batch กลางทาง (เช่น quota เกิน) server ก็ return error status แทน summary ได้ — `CloseAndRecv` ของ client จะเจอ error นั้น
 
 <Callout title="สรุปหนึ่งบรรทัด">
-Client streaming คือ `stream` ของ request กับ 1 response: client ส่งใน loop, half-close, แล้วได้คำตอบเดียวที่ server สร้างจาก batch ทั้งก้อน ใช้มันกับ upload, batching และการรับ data — และจำกัดเสมอว่า server จะรับแค่ไหน
+Client streaming คือ `stream` ของ request กับ 1 response: client ส่งใน loop, half-close, แล้วได้คำตอบเดียวที่ server สร้างจาก batch ทั้งก้อน ใช้รูปแบบนี้กับ upload, batching และการรับ data — และจำกัดเสมอว่า server จะรับแค่ไหน
 </Callout>
 
 export const quizCS = [

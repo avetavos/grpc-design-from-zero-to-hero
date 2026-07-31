@@ -38,7 +38,7 @@ export const serviceDiagram = `flowchart LR
   client["client stub"] -->|calls| svc
   svc -->|typed response| client`;
 
-พอจบโมดูลนี้ คุณจะอ่าน service block ใน `.proto` ตัวไหนก็ได้แล้วรู้ทันทีว่ามันมี call อะไรบ้าง อันไหน stream และมันรายงาน failure อย่างไร
+พอจบโมดูลนี้ คุณจะอ่าน service block ใน `.proto` ตัวไหนก็ได้แล้วรู้ทันทีว่ามี call อะไรบ้าง อันไหน stream และรายงาน failure อย่างไร
 
 <Callout title="วิธีคิด">
 message ตอบคำถามว่า "ข้อมูลหน้าตาเป็นยังไง?" ส่วน **service** ตอบว่า "ฉัน *ทำ* อะไรได้บ้าง?" ออกแบบ service ให้ดี — ชื่อ method ชัดเจน, request/response message เฉพาะของแต่ละ method, error code ที่ตรงไปตรงมา — แล้ว client ที่ generate ออกมาจะใช้งานสนุก ออกแบบมั่ว ๆ แล้วทุกคนที่เรียกใช้จะจ่ายราคานั้นไปตลอด

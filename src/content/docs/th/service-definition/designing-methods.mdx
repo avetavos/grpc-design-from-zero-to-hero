@@ -1,6 +1,6 @@
 ---
 title: 'Designing Methods'
-description: 'wrapper request/response message, convention การตั้งชื่อ, pagination และ idempotency — นิสัยที่ทำให้ API แข็งแรงเมื่อมันโตขึ้น'
+description: 'wrapper request/response message, convention การตั้งชื่อ, pagination และ idempotency — นิสัยที่ทำให้ API แข็งแรงเมื่อโตขึ้น'
 sidebar:
   order: 4
 ---
@@ -12,7 +12,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## API ที่คุณ ship ออกไปคือตลอดกาล
 
-method signature คือคำสัญญา พอ client พึ่งพามันแล้ว คุณเปลี่ยนได้แค่ในทางที่ backward-compatible เท่านั้น — หรือไม่ก็ bump ทั้ง package เป็น `v2` ดังนั้นนิสัยการออกแบบด้านล่างไม่ใช่แค่ขัดเงา แต่คือสิ่งที่ทำให้ API อยู่รอดผ่านการเปลี่ยนแปลงเป็นปี ๆ โดยไม่ต้อง migration ที่เจ็บปวด
+method signature คือคำสัญญา พอ client พึ่งพา signature นี้แล้ว คุณเปลี่ยนได้แค่ในทางที่ backward-compatible เท่านั้น — หรือไม่ก็ bump ทั้ง package เป็น `v2` ดังนั้นนิสัยการออกแบบด้านล่างไม่ใช่แค่ขัดเงา แต่คือสิ่งที่ทำให้ API อยู่รอดผ่านการเปลี่ยนแปลงเป็นปี ๆ โดยไม่ต้อง migration ที่เจ็บปวด
 
 ## wrap request และ response เสมอ
 
@@ -31,7 +31,7 @@ message DeleteUserResponse {}   // empty today, has room tomorrow
 rpc DeleteUser(int64) returns (google.protobuf.Empty);
 ```
 
-ทำไมต้อง wrap ทั้งที่วันนี้มันยังว่างอยู่?
+ทำไมต้อง wrap ทั้งที่วันนี้ message ยังว่างอยู่?
 
 - **มีที่ให้โต** การเพิ่ม flag `soft_delete` เข้าไปใน request หรือ timestamp `deleted_at` ใน response เป็นการเปลี่ยนแบบ additive ที่ปลอดภัย scalar เปล่า ๆ หรือ `Empty` ที่ใช้ร่วมกันไม่มีที่ให้เพิ่ม
 - **ชัดเจน** `DeleteUserRequest` บอกเจตนาได้ดีกว่า `int64`
@@ -69,7 +69,7 @@ export const pageDiagram = `flowchart LR
   r2 --> p2["next 50 +\nnext_page_token=def"]
   p2 --> r3["... until token is empty"]`;
 
-client ส่ง `next_page_token` ที่ได้กลับมาไปเรื่อย ๆ จนกว่ามันจะกลับมาเป็นค่าว่าง token นี้ **opaque** — server ตัดสินใจเองว่าจะ encode อะไร (offset, cursor, keyset) และ client ต้องไม่ parse มันเด็ดขาด อิสระนั้นทำให้คุณเปลี่ยน strategy การ pagination ทีหลังได้โดยไม่แตะ client แม้แต่ตัวเดียว
+client ส่ง `next_page_token` ที่ได้กลับมาไปเรื่อย ๆ จนกว่าจะกลับมาเป็นค่าว่าง token นี้ **opaque** — server ตัดสินใจเองว่าจะ encode อะไร (offset, cursor, keyset) และ client ต้องไม่ parse token นี้เด็ดขาด อิสระนั้นทำให้คุณเปลี่ยน strategy การ pagination ทีหลังได้โดยไม่แตะ client แม้แต่ตัวเดียว
 
 ## Idempotency: ทำให้ retry ปลอดภัย
 
@@ -107,10 +107,10 @@ export const quizDesign = [
   {
     q: 'ทำไม page_token ถึงต้อง opaque สำหรับ client?',
     options: [
-      'เพื่อซ่อนมันจาก log',
+      'เพื่อซ่อน token จาก log',
       'เพื่อให้ server เปลี่ยน strategy การ pagination ได้โดยไม่ทำให้ client พัง',
       'เพราะ token ถูก encrypt โดย gRPC',
-      'เพื่อทำให้มันสั้นลง',
+      'เพื่อทำให้ token สั้นลง',
     ],
     answer: 1,
   },

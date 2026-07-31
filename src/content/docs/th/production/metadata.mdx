@@ -1,6 +1,6 @@
 ---
 title: 'Metadata'
-description: 'header และ trailer แบบ key/value ที่เดินทางไปพร้อม call — auth token, trace id, request id — วิธีอ่านและเขียน และวิธีที่มัน propagate'
+description: 'header และ trailer แบบ key/value ที่เดินทางไปพร้อม call — auth token, trace id, request id — วิธีอ่านและเขียน และวิธีที่ metadata propagate'
 sidebar:
   order: 4
 ---
@@ -13,9 +13,9 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## ข้อมูลเกี่ยวกับ call ไม่ใช่ข้อมูลใน message
 
-request และ response message ถือข้อมูล *domain* ของคุณ — user, order แต่ข้อมูลบางอย่างเป็นเรื่อง *เกี่ยวกับตัว call เอง*: ใครเป็นคนเรียก, มันอยู่ใน trace ไหน, จะ log ด้วย request id อะไร ถ้าเอาพวกนี้ยัดเข้าไปในทุก message มันจะทำให้ schema รก gRPC ให้ช่องแยกต่างหาก: **metadata**
+request และ response message ถือข้อมูล *domain* ของคุณ — user, order แต่ข้อมูลบางอย่างเป็นเรื่อง *เกี่ยวกับตัว call เอง*: ใครเป็นคนเรียก, call นี้อยู่ใน trace ไหน, จะ log ด้วย request id อะไร ถ้าเอาพวกนี้ยัดเข้าไปในทุก message จะทำให้ schema รก gRPC ให้ช่องแยกต่างหาก: **metadata**
 
-metadata คือชุดของคู่ key/value ที่ส่งไปพร้อม call เหมือน HTTP header เป๊ะ — ซึ่งจริง ๆ แล้วมันก็กลายเป็น header บน HTTP/2 wire นั่นเอง
+metadata คือชุดของคู่ key/value ที่ส่งไปพร้อม call เหมือน HTTP header เป๊ะ — ซึ่งจริง ๆ แล้วก็กลายเป็น header บน HTTP/2 wire นั่นเอง
 
 ## header และ trailer
 
@@ -33,7 +33,7 @@ export const mdDiagram = `flowchart LR
 
 ## อ่านและเขียน metadata
 
-client ตั้ง header ก่อน call; server อ่านมัน และส่ง header กับ trailer กลับได้
+client ตั้ง header ก่อน call; server อ่าน header เหล่านั้น และส่ง header กับ trailer กลับได้
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -83,7 +83,7 @@ client ตั้ง header ก่อน call; server อ่านมัน แ�
 - **key เป็นตัวพิมพ์เล็ก** gRPC normalize key ของ metadata เป็น lowercase ASCII; ให้ปฏิบัติแบบ case-insensitive
 - **value แบบ binary ใช้ suffix `-bin`** key ที่ลงท้ายด้วย `-bin` (เช่น `trace-context-bin`) ถูกมองเป็น raw bytes และ base64-encode บน wire ส่วนอย่างอื่นต้องเป็น ASCII string ที่ถูกต้อง
 - **อย่าใช้ key ที่สงวนไว้ซ้ำ** key ที่ขึ้นต้นด้วย `grpc-` ถูกสงวนโดย framework — อย่าตั้งเอง
-- **metadata ไม่ได้เข้ารหัสในตัวมันเอง** — ความเป็นส่วนตัวมาจาก TLS บน channel token ใน metadata บน channel ที่ insecure ถือว่าเปิดเผย
+- **metadata ไม่ได้เข้ารหัสในตัวเอง** — ความเป็นส่วนตัวมาจาก TLS บน channel token ใน metadata บน channel ที่ insecure ถือว่าเปิดเผย
 
 ## การ propagate ข้าม call chain
 
@@ -118,7 +118,7 @@ export const quizMd = [
     q: 'key ของ metadata ที่ลงท้ายด้วย `-bin` หมายความว่าอะไร?',
     options: [
       'เป็น key ที่เลิกใช้แล้ว',
-      'value ของมันถูกมองเป็น raw bytes และ base64-encode บน wire',
+      'value ของตัวเองถูกมองเป็น raw bytes และ base64-encode บน wire',
       'ถูกบีบอัดสองครั้ง',
       'ถูกสงวนโดย framework',
     ],
@@ -129,8 +129,8 @@ export const quizMd = [
     options: [
       'gRPC copy metadata ทั้งหมดอัตโนมัติตลอดไป',
       'แต่ละ hop propagate trace/request id จาก metadata ขาเข้าไปขาออก ปกติใน interceptor',
-      'database เป็นตัว join มัน',
-      'มันถูกเก็บใน .proto',
+      'database เป็นตัว join trace ให้',
+      'ถูกเก็บใน .proto',
     ],
     answer: 1,
   },

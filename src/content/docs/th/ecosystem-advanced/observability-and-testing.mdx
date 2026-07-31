@@ -25,11 +25,11 @@ grpcurl -plaintext localhost:50051 list
 grpcurl -plaintext -d '{"id": 42}' localhost:50051 user.v1.UserService/GetUser
 ```
 
-เปิด reflection ใน non-production หรือหลัง auth — มันคือสิ่งที่ทำให้ server ที่รันอยู่สำรวจได้
+เปิด reflection ใน non-production หรือหลัง auth — reflection คือสิ่งที่ทำให้ server ที่รันอยู่สำรวจได้
 
 ## telemetry อยู่บน interceptor
 
-คุณเจอ interceptor มาแล้วในฐานะที่ ๆ ใส่ cross-cutting concern observability คือการใช้งานที่ใหญ่ที่สุดของมัน: interceptor chain เดียวเพิ่ม **metrics** (latency, จำนวน request, status code), **traces** (span ที่ตาม call ข้าม service) และ **log** แบบมีโครงสร้าง — ให้ทุก method โดยไม่แตะ handler code
+คุณเจอ interceptor มาแล้วในฐานะที่ ๆ ใส่ cross-cutting concern observability คือการใช้งานที่ใหญ่ที่สุดของตัวเอง: interceptor chain เดียวเพิ่ม **metrics** (latency, จำนวน request, status code), **traces** (span ที่ตาม call ข้าม service) และ **log** แบบมีโครงสร้าง — ให้ทุก method โดยไม่แตะ handler code
 
 <Mermaid title="interceptor chain เดียวทำให้ทุก method observe ได้" code={obsDiagram} />
 
@@ -123,19 +123,19 @@ export const quizObs = [
   {
     q: 'ทำไมต้อง test ด้วย in-process server (เช่น Go bufconn หรือ ephemeral port)?',
     options: [
-      'มันข้าม serialization ไปเลย',
-      'มันใช้เส้นทาง server, client และ interceptor จริง โดยไม่มี network ที่ช้าและ flaky',
-      'มันเป็นวิธีเดียวที่ test streaming ได้',
-      'มันไม่ต้องใช้ `.proto`',
+      'ข้าม serialization ไปเลย',
+      'ใช้เส้นทาง server, client และ interceptor จริง โดยไม่มี network ที่ช้าและ flaky',
+      'เป็นวิธีเดียวที่ test streaming ได้',
+      'ไม่ต้องใช้ `.proto`',
     ],
     answer: 1,
   },
   {
     q: 'จุดยืนที่ตรงไปตรงมาเรื่อง "gRPC เร็วกว่า REST" คืออะไร?',
     options: [
-      'มันเร็วกว่าอย่างมากในทุกกรณีเสมอ',
-      'มันมักเร็วกว่าสำหรับ call ปริมาณสูงขนาดเล็กที่มีโครงสร้าง แต่ควร benchmark workload จริงของคุณ',
-      'มันช้ากว่าเสมอ',
+      'เร็วกว่าอย่างมากในทุกกรณีเสมอ',
+      'มักเร็วกว่าสำหรับ call ปริมาณสูงขนาดเล็กที่มีโครงสร้าง แต่ควร benchmark workload จริงของคุณ',
+      'ช้ากว่าเสมอ',
       'performance ไม่เคยขึ้นกับ payload หรือ concurrency',
     ],
     answer: 1,

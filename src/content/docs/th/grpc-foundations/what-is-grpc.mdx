@@ -13,7 +13,7 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 
 ## Remote Procedure Call
 
-**gRPC** ย่อมาจาก *gRPC Remote Procedure Call* (ใช่ มันเป็น recursive) ส่วนที่สำคัญคือ **RPC**: แนวคิดว่าการเรียก code บนอีกเครื่องหนึ่งควรจะดูเหมือนการเรียก function ปกติ
+**gRPC** ย่อมาจาก *gRPC Remote Procedure Call* (ใช่ เป็น recursive) ส่วนที่สำคัญคือ **RPC**: แนวคิดว่าการเรียก code บนอีกเครื่องหนึ่งควรจะดูเหมือนการเรียก function ปกติ
 
 ถ้าไม่มี RPC การเรียกกันระหว่าง service หมายถึง: สร้าง URL, เลือก verb, serialize body เป็น JSON, ส่ง HTTP request, เช็ค status code, parse response และภาวนาว่าทั้งสองฝั่งตกลงเรื่องรูปร่างข้อมูลตรงกัน RPC ยุบทั้งหมดนั้นให้เหลือบรรทัดเดียว:
 
@@ -25,7 +25,7 @@ user = userService.GetUser(id: 42)
 
 ## contract มาก่อน
 
-สิ่งที่ทำให้เรื่องนี้เป็นไปได้คือ **contract** ที่เขียนก่อนจะ implement อะไรทั้งนั้น — ไฟล์ `.proto` มันประกาศ message (ข้อมูล) และ service (method):
+สิ่งที่ทำให้เรื่องนี้เป็นไปได้คือ **contract** ที่เขียนก่อนจะ implement อะไรทั้งนั้น — ไฟล์ `.proto` ประกาศ message (ข้อมูล) และ service (method):
 
 ```proto
 syntax = "proto3";
@@ -65,7 +65,7 @@ export const workflowDiagram = `flowchart LR
 2. **implement server** — เติมเนื้อในของ `GetUser`
 3. **call จาก client** — เรียก method ของ stub ที่ generate มา; request จะถูก serialize เป็น protobuf, ส่งผ่าน HTTP/2 แล้ว response ที่มี type ก็กลับมา
 
-นี่คือ call ฝั่ง client ใน 3 ภาษา สังเกตว่ามันสั้นแค่ไหน: ไม่มี URL, ไม่มี JSON, ไม่ต้องเช็ค status code — แค่เรียก method
+นี่คือ call ฝั่ง client ใน 3 ภาษา สังเกตว่าสั้นแค่ไหน: ไม่มี URL, ไม่มี JSON, ไม่ต้องเช็ค status code — แค่เรียก method
 
 <Tabs syncKey="lang">
   <TabItem label="Go">
@@ -143,7 +143,7 @@ export const quizWhat = [
   {
     q: 'ทำไม Go server กับ Python client ถึงคุยกันได้อย่างสมบูรณ์ใน gRPC?',
     options: [
-      'มัน share runtime กัน',
+      'share runtime กัน',
       'ทั้งคู่ generate มาจาก `.proto` contract เดียวกัน',
       'Python compile เป็น Go',
       'ทั้งคู่ใช้ JSON ภายใน',

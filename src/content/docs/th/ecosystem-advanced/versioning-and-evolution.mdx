@@ -28,7 +28,7 @@ package user.v1;   // user/v1/user.proto
 
 ## additive vs breaking
 
-การเปลี่ยนส่วนใหญ่ควรเป็นแบบ **additive** — ปลอดภัยเพราะ wire format ไม่สนสิ่งที่มันไม่รู้จัก:
+การเปลี่ยนส่วนใหญ่ควรเป็นแบบ **additive** — ปลอดภัยเพราะ wire format ไม่สนสิ่งที่ไม่รู้จัก:
 
 | ปลอดภัย (additive) | breaking (ต้องขึ้น version ใหม่) |
 |-----------------|-------------------------------|
@@ -48,7 +48,7 @@ export const evoDiagram = `flowchart TB
 
 ## reserve สิ่งที่เลิกใช้
 
-เมื่อคุณ*ลบ* field จริง ๆ อย่าให้ number (หรือ name) ของมันถูก reuse — field ในอนาคตที่ใช้ number เดิมจะอ่านข้อมูลเก่าผิดแบบเงียบ ๆ ให้ mark เป็น reserved:
+เมื่อคุณ*ลบ* field จริง ๆ อย่าให้ number (หรือ name) ของตัวเองถูก reuse — field ในอนาคตที่ใช้ number เดิมจะอ่านข้อมูลเก่าผิดแบบเงียบ ๆ ให้ mark เป็น reserved:
 
 ```proto
 message User {
@@ -102,17 +102,17 @@ export const quizVer = [
       'เพื่อให้ message เล็กลง',
       'เพื่อให้ number นั้นถูก reuse ไม่ได้ และไม่อ่านข้อมูลเก่าผิดแบบเงียบ ๆ',
       'เพื่อเร่งการ decode',
-      'มันมีไว้แค่เป็น documentation',
+      'มีไว้แค่เป็น documentation',
     ],
     answer: 1,
   },
   {
     q: 'การรัน `buf breaking` ใน CI ได้อะไร?',
     options: [
-      'มัน format ไฟล์ `.proto` ให้',
-      'มันทำให้ build fail อัตโนมัติเมื่อ change จะทำลาย wire หรือ generated-code compatibility',
-      'มัน deploy version ใหม่',
-      'มัน generate client stub',
+      'format ไฟล์ `.proto` ให้',
+      'ทำให้ build fail อัตโนมัติเมื่อ change จะทำลาย wire หรือ generated-code compatibility',
+      'deploy version ใหม่',
+      'generate client stub',
     ],
     answer: 1,
   },
