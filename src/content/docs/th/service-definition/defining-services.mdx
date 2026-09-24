@@ -32,7 +32,7 @@ service UserService {
 สังเกตว่าทุก method รับ request message **ของตัวเอง** และ return response message **ของตัวเอง** — แม้แต่ `GetUser` ที่ในเชิงแนวคิดต้องการแค่ id นี่ตั้งใจทำ ไม่ใช่เขียนยาวเกินจำเป็น
 
 ```proto
-// ทำแบบนี้ — message เฉพาะตัว
+// Do this — dedicated messages
 rpc GetUser(GetUserRequest) returns (User);
 
 message GetUserRequest {

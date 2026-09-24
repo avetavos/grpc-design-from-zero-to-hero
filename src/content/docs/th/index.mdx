@@ -58,3 +58,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     RPC lifecycle, HTTP/2 multiplexing, call ทั้ง 4 แบบ และ interceptor chain เป็นไดอะแกรม Mermaid ที่รองรับธีม สองภาษา (English / ไทย) พร้อมบันทึกความคืบหน้า quiz
   </Card>
 </CardGrid>
+
+## เวอร์ชันที่ตรวจสอบแล้ว
+
+ข้อเท็จจริง, CLI flag และรูปแบบ generated code ในคอร์สนี้ตรวจกับเครื่องมือและเอกสารทางการปัจจุบัน ณ วันที่ 2026-09-24: **buf CLI 1.71** (`buf.yaml`/`buf.gen.yaml` ใช้ `version: v2`, remote plugin บน BSR), **protoc 33.x**, **Go 1.26** คู่กับ `google.golang.org/grpc` (`grpc.NewClient` — `grpc.Dial` ถูก deprecate แล้วให้ใช้ตัวนี้แทน) และ `google.golang.org/protobuf` Protocol Buffers **Editions** (ฉบับล่าสุดที่ปล่อยจริง: **Edition 2024**) กำลังมาแทน syntax keyword `proto2`/`proto3` ในอนาคต แต่ไฟล์ proto3 ยังใช้งานได้เต็มรูปแบบ และ import ร่วมกับไฟล์ edition ได้อย่างอิสระ — `syntax = "proto3"` ที่ใช้ตลอดทั้งคอร์สนี้ยังทำงานได้เหมือนเดิม

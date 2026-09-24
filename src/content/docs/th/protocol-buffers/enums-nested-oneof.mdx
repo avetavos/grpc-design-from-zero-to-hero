@@ -49,13 +49,13 @@ message ใส่ message อื่นข้างในได้ การ nest
 message Order {
   int64 id = 1;
 
-  message LineItem {          // scope อยู่ใน Order (Order.LineItem)
+  message LineItem {          // scoped to Order (Order.LineItem)
     string sku      = 1;
     int32  quantity = 2;
   }
 
   repeated LineItem items = 2;
-  Address shipping        = 3;  // message ระดับบนสุดที่ reuse มาใช้ที่นี่
+  Address shipping        = 3;  // a top-level message reused here
 }
 ```
 

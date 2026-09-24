@@ -49,8 +49,8 @@ export const compatDiagram = `flowchart TB
 
 ```proto
 message User {
-  reserved 3, 7;                 // field number ที่ปลดระวาง — ห้าม reuse
-  reserved "email", "phone";     // ชื่อที่ปลดระวาง — ดักการ re-add โดยพลาด
+  reserved 3, 7;                 // retired field numbers — never reuse
+  reserved "email", "phone";     // retired names — catch accidental re-adds
 
   int64  id       = 1;
   string name     = 2;

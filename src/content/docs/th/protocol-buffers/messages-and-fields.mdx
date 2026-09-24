@@ -65,8 +65,8 @@ protobuf ให้ `reserved` ไว้ล็อก number ที่ปลดร
 
 ```proto
 message User {
-  reserved 3;               // field number เดิมของ 'email' — ห้าม reuse
-  reserved "email";         // และชื่อเดิม เพื่อดักความผิดพลาด
+  reserved 3;               // the old 'email' field number — never reuse
+  reserved "email";         // and the old name, to catch mistakes
 
   int64  id       = 1;
   string name     = 2;

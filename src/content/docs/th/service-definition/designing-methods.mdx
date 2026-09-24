@@ -19,7 +19,7 @@ method signature คือคำสัญญา พอ client พึ่งพา
 กฎที่มีค่าที่สุด: **ทุก method มี request message และ response message ของตัวเอง** อย่ารับหรือ return scalar เปล่า ๆ และอย่า reuse domain message มาเป็น request
 
 ```proto
-// ทำแบบนี้
+// Do this
 rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 
 message DeleteUserRequest  { int64 id = 1; }
@@ -27,7 +27,7 @@ message DeleteUserResponse {}   // empty today, has room tomorrow
 ```
 
 ```proto
-// เลี่ยงแบบนี้
+// Avoid this
 rpc DeleteUser(int64) returns (google.protobuf.Empty);
 ```
 

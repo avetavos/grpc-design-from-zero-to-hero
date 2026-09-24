@@ -17,8 +17,8 @@ import ProgressTracker from '../../../../components/ProgressTracker.tsx';
 ```proto
 message Playlist {
   string          name  = 1;
-  repeated string songs = 2;   // string 0..N ตัว
-  repeated Track  tracks = 3;  // message 0..N ตัว
+  repeated string songs = 2;   // 0..N strings
+  repeated Track  tracks = 3;  // 0..N messages
 }
 ```
 
@@ -69,7 +69,7 @@ message Event {
 
 message UpdateUserRequest {
   User                        user       = 1;
-  google.protobuf.FieldMask   update_mask = 2;  // จะเปลี่ยน field ไหนบ้าง
+  google.protobuf.FieldMask   update_mask = 2;  // which fields to change
 }
 ```
 

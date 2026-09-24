@@ -58,3 +58,7 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
     The RPC lifecycle, HTTP/2 multiplexing, the four call types, and interceptor chains as theme-aware Mermaid diagrams. Bilingual (English / ไทย) with saved quiz progress.
   </Card>
 </CardGrid>
+
+## Verified versions
+
+This course's facts, CLI flags, and generated-code patterns were checked against current tooling and official docs as of 2026-09-24: **buf CLI 1.71** (`buf.yaml`/`buf.gen.yaml` `version: v2`, remote plugins on the BSR), **protoc 33.x**, **Go 1.26** with `google.golang.org/grpc` (`grpc.NewClient` — `grpc.Dial` is deprecated in its favor) and `google.golang.org/protobuf`. Protocol Buffers **Editions** (latest released: **Edition 2024**) now supersede the `proto2`/`proto3` syntax keywords going forward, but proto3 files remain fully supported and can be freely imported alongside edition files — the `syntax = "proto3"` used throughout this course keeps working unchanged.
