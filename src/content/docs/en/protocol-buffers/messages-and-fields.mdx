@@ -35,7 +35,7 @@ When protobuf encodes a message, each field becomes a **tag** — the field numb
 <Mermaid title="A field on the wire is a numbered tag plus a value" code={wireDiagram} />
 
 export const wireDiagram = `flowchart LR
-  field["name = \"Ada\"  (field #2)"] --> tag["tag: field 2, type length-delimited"]
+  field["name = #quot;Ada#quot;  (field #2)"] --> tag["tag: field 2, type length-delimited"]
   tag --> val["value: 3 bytes 'Ada'"]
   val --> bytes["on the wire: a few bytes total"]`;
 

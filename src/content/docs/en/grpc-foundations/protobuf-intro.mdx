@@ -39,10 +39,10 @@ The `= 1`, `= 2`, `= 3` are **field numbers**, and they are the most important i
 
 export const encodeDiagram = `flowchart LR
   subgraph json["JSON on the wire"]
-    j["{\"id\":1,\"name\":\"Ada\",\"email\":\"a@x.io\"}\n— keys repeated as text"]
+    j["{#quot;id#quot;:1,#quot;name#quot;:#quot;Ada#quot;,#quot;email#quot;:#quot;a@x.io#quot;}<br/>— keys repeated as text"]
   end
   subgraph pb["Protobuf on the wire"]
-    p["[1→1][2→Ada][3→a@x.io]\n— numbered tags + binary values"]
+    p["[1→1][2→Ada][3→a@x.io]<br/>— numbered tags + binary values"]
   end`;
 
 Two consequences fall out of this one design choice:

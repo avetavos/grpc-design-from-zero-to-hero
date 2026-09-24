@@ -39,10 +39,10 @@ message User {
 
 export const encodeDiagram = `flowchart LR
   subgraph json["JSON บน wire"]
-    j["{\"id\":1,\"name\":\"Ada\",\"email\":\"a@x.io\"}\n— key ซ้ำเป็น text"]
+    j["{#quot;id#quot;:1,#quot;name#quot;:#quot;Ada#quot;,#quot;email#quot;:#quot;a@x.io#quot;}<br/>— key ซ้ำเป็น text"]
   end
   subgraph pb["Protobuf บน wire"]
-    p["[1→1][2→Ada][3→a@x.io]\n— tag ที่เป็นหมายเลข + ค่า binary"]
+    p["[1→1][2→Ada][3→a@x.io]<br/>— tag ที่เป็นหมายเลข + ค่า binary"]
   end`;
 
 การตัดสินใจออกแบบอย่างเดียวนี้ให้ผลตามมา 2 อย่าง:
